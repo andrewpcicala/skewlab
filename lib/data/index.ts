@@ -1,9 +1,9 @@
 import type { MarketDataProvider, OptionChain } from "./types";
-import { PolygonProvider } from "./polygon";
+import { AlpacaProvider } from "./alpaca";
 import { getCachedChain, setCachedChain } from "./cache";
 
 // The only place a concrete provider is referenced.
-const provider = new PolygonProvider();
+const provider = new AlpacaProvider();
 
 // Cached wrapper — chain hits are instant; misses fetch + store.
 const cachedProvider: MarketDataProvider = {

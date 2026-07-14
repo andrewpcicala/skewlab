@@ -1,11 +1,10 @@
-// Swappable provider module. The rest of the app imports only the
-// MarketDataProvider interface, never a concrete provider.
+// Polygon.io provider — retained for Phase 3 historical stock aggregates.
+// Options chain is now served by AlpacaProvider (lib/data/alpaca.ts).
+// Nothing imports this file yet; it will be wired in Phase 3 for
+// historical close data via /v2/aggs/ticker/{ticker}/range.
 //
 // TIER NOTE: /v3/snapshot/options returns 403 on the free Polygon plan.
-// This implementation generates standard monthly option tickers from the
-// spot price and fetches each via /v2/aggs/ticker/{ticker}/prev (EOD aggs),
-// which IS available on the free tier. bid/ask/OI are unavailable this way;
-// close is used as the market-price proxy (quoteBasis = "close").
+// Options chain was attempted here but proved unavailable on this tier.
 
 import type { MarketDataProvider, OptionChain, OptionQuote } from "./types";
 

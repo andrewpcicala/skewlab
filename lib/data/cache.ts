@@ -1,6 +1,6 @@
 import type { OptionChain } from "./types";
 
-const TTL_MS = 6 * 60 * 60 * 1000; // 6 hours — EOD data doesn't change intraday
+const TTL_MS = 15 * 60 * 1000; // 15 minutes — indicative feed is fresher than EOD
 
 interface CacheEntry {
   chain: OptionChain;
