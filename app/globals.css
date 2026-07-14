@@ -1,26 +1,39 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  /* Design tokens — all colors are defined here, never inline in components */
+  --color-bg: #0a0a0c;
+  --color-card: #141418;
+  --color-edge: #26262c;
+  --color-pos: #22c55e;
+  --color-neg: #ef4444;
+  --color-accent: #3b82f6;
+  --color-label: #8a8a93;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Font families reference next/font CSS variables injected at runtime */
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jb-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* .num — every numeric value in the app uses this class */
+@utility num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Used for all field labels and table headers */
+@utility label-caps {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-label);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-bg);
+  color: #e7e7ea;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
