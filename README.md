@@ -1,1 +1,1 @@
-SkewLab is an options analytics and paper-trading research platform; all pricing and volatility math is hand-written in TypeScript; analytics only, nothing touches real money. Note that this README will be rewritten as a research abstract in Phase 3.
+SkewLab is an options analytics and paper-trading research platform; all pricing and volatility math is hand-written in TypeScript; analytics only, nothing touches real money. Market data is provided by Polygon.io (free tier, end-of-day). Note that this README will be rewritten as a research abstract in Phase 3.

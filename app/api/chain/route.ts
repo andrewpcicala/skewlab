@@ -1,0 +1,25 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getProvider } from "@/lib/data";
+
+const SYMBOL_RE = /^[A-Z]{1,5}$/;
+
+export async function GET(req: NextRequest) {
+  const rawSymbol = req.nextUrl.searchParams.get("symbol") ?? "SPY";
+  const symbol = rawSymbol.toUpperCase().trim();
+
+  if (!SYMBOL_RE.test(symbol)) {
+    return NextResponse.json(
+      { error: `Invalid symbol "${symbol}". Must be 1–5 uppercase letters.` },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const chain = await getProvider().getChain(symbol);
+    return NextResponse.json(chain);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    const status = message.includes("rate limit") ? 429 : 502;
+    return NextResponse.json({ error: message }, { status });
+  }
+}
