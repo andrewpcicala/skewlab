@@ -127,7 +127,7 @@ export class AlpacaProvider implements MarketDataProvider {
         const ask  = snap.latestQuote?.ap && snap.latestQuote.ap > 0
           ? snap.latestQuote.ap : null;
         const mid  = bid !== null && ask !== null ? (bid + ask) / 2 : null;
-        const last = snap.latestTrade?.p ?? snap.dailyBar?.c ?? 0;
+        const last = snap.latestTrade?.p ?? null; // null when untraded; never fall back to close
 
         quotes.push({
           symbol:       ticker,

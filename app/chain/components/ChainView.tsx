@@ -12,10 +12,12 @@ export default function ChainView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedExpiry, setSelectedExpiry] = useState<string>("");
+  const [showAll, setShowAll] = useState(false);
 
   const fetchChain = useCallback(async (sym: string) => {
     setLoading(true);
     setError(null);
+    setShowAll(false);
     try {
       const r = await fetch(`/api/chain?symbol=${encodeURIComponent(sym)}`);
       const data = await r.json();
@@ -50,7 +52,7 @@ export default function ChainView() {
   );
 
   // Build T-table rows for the selected expiry
-  const rows: ChainRow[] = (() => {
+  const allRows: ChainRow[] = (() => {
     if (!chain || !selectedExpiry) return [];
     const quotes = chain.quotes.filter((q) => q.expiry === selectedExpiry);
     const strikes = [...new Set(quotes.map((q) => q.strike))].sort((a, b) => a - b);
@@ -61,11 +63,26 @@ export default function ChainView() {
     }));
   })();
 
+  // Default ±15% window; expand to full chain with SHOW ALL
+  const rows = showAll || !chain
+    ? allRows
+    : allRows.filter(
+        (r) => r.strike >= chain.spot * 0.85 && r.strike <= chain.spot * 1.15
+      );
+
   return (
     <div>
-      {/* Top row: ticker input left, status right */}
-      <div className="flex items-end justify-between mb-8">
-        <TickerInput onSubmit={handleSubmit} />
+      {/* Top row: ticker + spot left, status right */}
+      <div className="flex items-end justify-between border-b border-edge pb-6 mb-6">
+        <div className="flex items-baseline gap-6">
+          <TickerInput onSubmit={handleSubmit} />
+          {chain && !loading && (
+            <span className="label-caps">
+              SPOT{" "}
+              <span className="num text-[#E7E7EA]">{chain.spot.toFixed(2)}</span>
+            </span>
+          )}
+        </div>
         {chain && !loading && (
           <StatusLine
             dataQuality={chain.dataQuality}
@@ -93,6 +110,16 @@ export default function ChainView() {
             />
           </div>
           <ChainTable ticker={symbol} rows={rows} spot={chain.spot} />
+          {!showAll && allRows.length > rows.length && (
+            <div className="mt-4">
+              <button
+                onClick={() => setShowAll(true)}
+                className="label-caps text-accent hover:opacity-70 transition-opacity duration-[100ms]"
+              >
+                SHOW ALL STRIKES
+              </button>
+            </div>
+          )}
         </>
       )}
     </div>

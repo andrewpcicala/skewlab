@@ -40,7 +40,7 @@ function PriceCell({
   align,
 }: {
   value: number | null | undefined;
-  colorClass?: string; // e.g. "text-pos" or "text-neg" — only applied when non-null
+  colorClass?: string;
   align: "right" | "left";
 }) {
   const isNull = value === null || value === undefined;
@@ -57,10 +57,11 @@ function PriceCell({
 
 function VolCell({ value, align }: { value: number | null | undefined; align: "right" | "left" }) {
   const isNull = value === null || value === undefined;
+  const isZero = value === 0;
   return (
     <span
       className={`num text-sm ${align === "right" ? "block text-right" : "block text-left"} ${
-        isNull ? "text-label" : ""
+        isNull ? "text-label" : isZero ? "opacity-70" : ""
       }`}
     >
       {fmtVol(value)}
@@ -83,9 +84,17 @@ function AnimatedBody({ rows, spot }: AnimBodyProps) {
   const isFirstRender = useRef(true);
   // Capture animate value before the effect sets isFirstRender to false
   const shouldAnimate = isFirstRender.current && !reduced;
+  const atmRowRef = useRef<HTMLTableRowElement | null>(null);
 
   useEffect(() => {
     isFirstRender.current = false;
+  }, []);
+
+  // Scroll ATM row to center on mount (once per ticker, instant — no animation)
+  useEffect(() => {
+    if (atmRowRef.current) {
+      atmRowRef.current.scrollIntoView({ block: "center", behavior: "instant" });
+    }
   }, []);
 
   const atmStrike = rows.reduce(
@@ -105,6 +114,7 @@ function AnimatedBody({ rows, spot }: AnimBodyProps) {
         return (
           <motion.tr
             key={row.strike}
+            ref={isAtm ? atmRowRef : undefined}
             initial={shouldAnimate ? { opacity: 0, y: 4 } : false}
             animate={{ opacity: 1, y: 0 }}
             transition={{
@@ -113,7 +123,7 @@ function AnimatedBody({ rows, spot }: AnimBodyProps) {
               ease: EASE_OUT,
             }}
             style={isAtm ? { borderTop: "1px solid var(--color-accent)" } : undefined}
-            className="h-8"
+            className="h-8 hover:bg-[#101014] transition-colors duration-[100ms]"
           >
             {/* ── CALLS ──────────────────────────────────────── */}
             <td className={`px-3 ${callDim}`}>
@@ -133,8 +143,13 @@ function AnimatedBody({ rows, spot }: AnimBodyProps) {
             </td>
 
             {/* ── STRIKE ─────────────────────────────────────── */}
-            <td className="px-4 text-center border-l border-r border-edge">
+            <td className="px-4 text-center border-l border-r border-edge relative">
               <span className="num text-sm text-[#E7E7EA]">{fmtStrike(row.strike)}</span>
+              {isAtm && (
+                <span className="label-caps text-accent absolute right-1 top-0 -translate-y-full text-[10px] leading-none">
+                  SPOT {fmtPrice(spot)}
+                </span>
+              )}
             </td>
 
             {/* ── PUTS ───────────────────────────────────────── */}
@@ -175,7 +190,7 @@ export default function ChainTable({ ticker, rows, spot }: Props) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full border-collapse text-sm">
-        <thead>
+        <thead className="sticky top-0 bg-bg z-10">
           <tr className="border-b border-edge">
             {/* CALLS */}
             <th className={TH_R}>VOL</th>
