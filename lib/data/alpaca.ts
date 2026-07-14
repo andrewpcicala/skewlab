@@ -141,7 +141,7 @@ export class AlpacaProvider implements MarketDataProvider {
           close:        snap.dailyBar?.c ?? null,
           last,
           volume:       snap.dailyBar?.v ?? 0,
-          openInterest: 0,    // not in Alpaca snapshot response
+          openInterest: null, // not in Alpaca snapshot response
           iv:           null, // vendor IV deliberately ignored — all pricing math
                               // in this app is hand-written (/lib/pricing)
         });

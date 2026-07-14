@@ -10,7 +10,7 @@ export interface OptionQuote {
   close: number | null; // prior-day close from aggregates
   last: number;
   volume: number;
-  openInterest: number;
+  openInterest: number | null; // null when absent from feed (0 would be a false claim)
   iv: number | null;    // null until Phase 2 — never use a vendor's precomputed IV
 }
 
