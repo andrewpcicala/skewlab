@@ -11,9 +11,11 @@ export interface ChainRow {
 }
 
 interface Props {
-  ticker: string; // changes on new ticker load → resets row animation
-  rows: ChainRow[];
-  spot: number;
+  ticker:   string; // changes on new ticker load → resets row animation
+  rows:     ChainRow[];
+  spot:     number;
+  selected: OptionQuote | null;
+  onSelect: (q: OptionQuote) => void;
 }
 
 // ── Formatting helpers ─────────────────────────────────────────────────────
@@ -75,11 +77,13 @@ function VolCell({ value, align }: { value: number | null | undefined; align: "r
 // resetting isFirstRender so the stagger runs exactly once per ticker.
 
 interface AnimBodyProps {
-  rows: ChainRow[];
-  spot: number;
+  rows:     ChainRow[];
+  spot:     number;
+  selected: OptionQuote | null;
+  onSelect: (q: OptionQuote) => void;
 }
 
-function AnimatedBody({ rows, spot }: AnimBodyProps) {
+function AnimatedBody({ rows, spot, selected, onSelect }: AnimBodyProps) {
   const { reduced } = useMotionSafe();
   const isFirstRender = useRef(true);
   // Capture animate value before the effect sets isFirstRender to false
@@ -111,6 +115,23 @@ function AnimatedBody({ rows, spot }: AnimBodyProps) {
         const callDim = callOTM ? "opacity-70" : "";
         const putDim  = putOTM  ? "opacity-70" : "";
 
+        const isCallSelected = selected !== null && selected.symbol === row.call?.symbol;
+        const isPutSelected  = selected !== null && selected.symbol === row.put?.symbol;
+
+        // 2px accent border on outermost cell of the selected side; compensate padding
+        // so content position stays identical: border-l-2 + pl-[10px] = 12px (same as px-3)
+        const callOuterCls = isCallSelected
+          ? "border-l-2 border-accent pl-[10px] pr-3"
+          : "px-3";
+        const putOuterCls = isPutSelected
+          ? "border-r-2 border-accent pr-[10px] pl-3"
+          : "px-3";
+
+        const clickCall = row.call ? () => onSelect(row.call!) : undefined;
+        const clickPut  = row.put  ? () => onSelect(row.put!)  : undefined;
+        const callPtr   = row.call ? "cursor-pointer" : "";
+        const putPtr    = row.put  ? "cursor-pointer" : "";
+
         return (
           <motion.tr
             key={row.strike}
@@ -126,19 +147,19 @@ function AnimatedBody({ rows, spot }: AnimBodyProps) {
             className="h-8 hover:bg-[#101014] transition-colors duration-[100ms]"
           >
             {/* ── CALLS ──────────────────────────────────────── */}
-            <td className={`px-3 ${callDim}`}>
+            <td className={`${callOuterCls} ${callDim} ${callPtr}`} onClick={clickCall}>
               <VolCell value={row.call?.volume} align="right" />
             </td>
-            <td className={`px-3 ${callDim}`}>
+            <td className={`px-3 ${callDim} ${callPtr}`} onClick={clickCall}>
               <PriceCell value={row.call?.last} align="right" />
             </td>
-            <td className={`px-3 ${callDim}`}>
+            <td className={`px-3 ${callDim} ${callPtr}`} onClick={clickCall}>
               <PriceCell value={row.call?.mid} align="right" />
             </td>
-            <td className={`px-3 ${callDim}`}>
+            <td className={`px-3 ${callDim} ${callPtr}`} onClick={clickCall}>
               <PriceCell value={row.call?.ask} colorClass="text-neg" align="right" />
             </td>
-            <td className={`px-3 ${callDim}`}>
+            <td className={`px-3 ${callDim} ${callPtr}`} onClick={clickCall}>
               <PriceCell value={row.call?.bid} colorClass="text-pos" align="right" />
             </td>
 
@@ -153,19 +174,19 @@ function AnimatedBody({ rows, spot }: AnimBodyProps) {
             </td>
 
             {/* ── PUTS ───────────────────────────────────────── */}
-            <td className={`px-3 ${putDim}`}>
+            <td className={`px-3 ${putDim} ${putPtr}`} onClick={clickPut}>
               <PriceCell value={row.put?.bid} colorClass="text-pos" align="left" />
             </td>
-            <td className={`px-3 ${putDim}`}>
+            <td className={`px-3 ${putDim} ${putPtr}`} onClick={clickPut}>
               <PriceCell value={row.put?.ask} colorClass="text-neg" align="left" />
             </td>
-            <td className={`px-3 ${putDim}`}>
+            <td className={`px-3 ${putDim} ${putPtr}`} onClick={clickPut}>
               <PriceCell value={row.put?.mid} align="left" />
             </td>
-            <td className={`px-3 ${putDim}`}>
+            <td className={`px-3 ${putDim} ${putPtr}`} onClick={clickPut}>
               <PriceCell value={row.put?.last} align="left" />
             </td>
-            <td className={`px-3 ${putDim}`}>
+            <td className={`${putOuterCls} ${putDim} ${putPtr}`} onClick={clickPut}>
               <VolCell value={row.put?.volume} align="left" />
             </td>
           </motion.tr>
@@ -184,7 +205,7 @@ const TH_C =
 
 // ── ChainTable ─────────────────────────────────────────────────────────────
 
-export default function ChainTable({ ticker, rows, spot }: Props) {
+export default function ChainTable({ ticker, rows, spot, selected, onSelect }: Props) {
   if (rows.length === 0) return null;
 
   return (
@@ -209,7 +230,13 @@ export default function ChainTable({ ticker, rows, spot }: Props) {
           </tr>
         </thead>
         <tbody className="divide-y divide-edge">
-          <AnimatedBody key={ticker} rows={rows} spot={spot} />
+          <AnimatedBody
+            key={ticker}
+            rows={rows}
+            spot={spot}
+            selected={selected}
+            onSelect={onSelect}
+          />
         </tbody>
       </table>
     </div>
