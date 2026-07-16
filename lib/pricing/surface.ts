@@ -51,14 +51,38 @@ export function buildIvSurface(chain: OptionChain, spot: number): IvSurface {
     stats.skipped[reason] = (stats.skipped[reason] ?? 0) + 1;
   };
 
+  // ── Seam-stitch pre-pass ──────────────────────────────────────────────────
+  // OTM puts (strike < spot) and OTM calls (strike > spot) leave a gap right
+  // at ATM. To allow connectgaps:true to stitch the sheet across that seam,
+  // include the single nearest-to-spot ITM contract on each side per expiry.
+  // These bypass the OTM filter only; every other quality gate still applies.
+  const seamSymbols = new Set<string>();
+  const byExpiry = new Map<string, typeof chain.quotes>();
+  for (const q of chain.quotes) {
+    const arr = byExpiry.get(q.expiry) ?? [];
+    arr.push(q);
+    byExpiry.set(q.expiry, arr);
+  }
+  for (const quotes of byExpiry.values()) {
+    // Nearest ITM call: highest call strike below spot
+    const itmCalls = quotes.filter(q => q.type === "call" && q.strike < spot);
+    if (itmCalls.length)
+      seamSymbols.add(itmCalls.reduce((b, q) => q.strike > b.strike ? q : b).symbol);
+    // Nearest ITM put: lowest put strike above spot
+    const itmPuts = quotes.filter(q => q.type === "put" && q.strike > spot);
+    if (itmPuts.length)
+      seamSymbols.add(itmPuts.reduce((b, q) => q.strike < b.strike ? q : b).symbol);
+  }
+
   for (const q of chain.quotes) {
     // ── OTM filter ────────────────────────────────────────────────────────
-    // Puts below spot, calls above spot. ATM (strike === spot) is excluded:
-    // it's not cleanly OTM or ITM and the exact split between put and call
-    // surface is ambiguous there.
-    const isOtm = (q.type === "call" && q.strike > spot) ||
-                  (q.type === "put"  && q.strike < spot);
-    if (!isOtm) { bump("itm"); continue; }
+    // Puts below spot, calls above spot. ATM (strike === spot) excluded.
+    // Seam-stitch contracts (nearest ITM each side per expiry) bypass this
+    // filter to close the ATM gap; all other gates still apply.
+    const isOtm  = (q.type === "call" && q.strike > spot) ||
+                   (q.type === "put"  && q.strike < spot);
+    const isSeam = seamSymbols.has(q.symbol);
+    if (!isOtm && !isSeam) { bump("itm"); continue; }
 
     // ── Mid requirement ───────────────────────────────────────────────────
     // No close-based IVs on the surface. See function-level comment.

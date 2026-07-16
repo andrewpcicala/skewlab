@@ -4,10 +4,49 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import TickerInput from "@/app/chain/components/TickerInput";
 import type { SurfacePoint, SurfaceStats } from "@/lib/pricing/surface";
 
-// SurfacePlot is browser-only (Plotly + WebGL); loading fallback shown inline
+// ── Loading state ─────────────────────────────────────────────────────────────
+// Three dots animate opacity in sequence (400ms per beat, 1.2s cycle).
+// Reduced-motion: dots are static via the .dot-blink CSS rule in globals.css.
+function SolvingPlaceholder() {
+  return (
+    <div
+      style={{
+        height:         "70vh",
+        display:        "flex",
+        alignItems:     "center",
+        justifyContent: "center",
+      }}
+    >
+      <span className="label-caps">
+        SOLVING SURFACE
+        <span
+          className="dot-blink"
+          style={{ animation: "dot-blink 1.2s ease-in-out infinite", animationDelay: "0s" }}
+        >
+          .
+        </span>
+        <span
+          className="dot-blink"
+          style={{ animation: "dot-blink 1.2s ease-in-out infinite", animationDelay: "0.4s" }}
+        >
+          .
+        </span>
+        <span
+          className="dot-blink"
+          style={{ animation: "dot-blink 1.2s ease-in-out infinite", animationDelay: "0.8s" }}
+        >
+          .
+        </span>
+      </span>
+    </div>
+  );
+}
+
+// SurfacePlot is browser-only (Plotly + WebGL); loading fallback occupies the
+// same space as the plot so the page doesn't reflow when the plot mounts.
 const SurfacePlot = dynamic(() => import("./SurfacePlot"), {
   ssr:     false,
-  loading: () => <p className="label-caps" style={{ padding: "2rem 0" }}>SOLVING SURFACE…</p>,
+  loading: SolvingPlaceholder,
 });
 
 interface SurfaceData {
@@ -18,7 +57,7 @@ interface SurfaceData {
 }
 
 // ── Skew readout ──────────────────────────────────────────────────────────────
-// Finds front-expiry ATM IV and 10%-OTM put IV from solved surface points.
+// Front-expiry ATM IV and 10%-OTM put IV from solved surface points.
 function computeSkew(points: SurfacePoint[], spot: number) {
   if (!points.length) return null;
 
@@ -38,19 +77,19 @@ function computeSkew(points: SurfacePoint[], spot: number) {
   );
 
   return {
-    dte:      Math.round(atm.dte),
+    dte:       Math.round(atm.dte),
     atmStrike: atm.strike,
-    atmIv:    atm.iv * 100,
+    atmIv:     atm.iv * 100,
     otmStrike: otmPut.strike,
-    otmIv:    otmPut.iv * 100,
-    spread:   (otmPut.iv - atm.iv) * 100,
+    otmIv:     otmPut.iv * 100,
+    spread:    (otmPut.iv - atm.iv) * 100,
   };
 }
 
 // ── Main view ─────────────────────────────────────────────────────────────────
 export default function SurfaceView() {
-  const [ticker, setTicker]   = useState("SPY");
-  const [data,   setData]     = useState<SurfaceData | null>(null);
+  const [ticker,  setTicker]  = useState("SPY");
+  const [data,    setData]    = useState<SurfaceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
 
@@ -94,8 +133,11 @@ export default function SurfaceView() {
 
   return (
     <div>
-      {/* Header row */}
-      <div className="flex items-end justify-between border-b border-edge pb-6 mb-6">
+      {/* ── Header ──────────────────────────────────────────────────────── */}
+      <div
+        className="flex items-end justify-between border-b border-edge"
+        style={{ paddingBottom: "24px", marginBottom: "24px" }}
+      >
         <div className="flex items-baseline gap-6">
           <TickerInput onSubmit={handleSubmit} />
           {data && !loading && (
@@ -106,7 +148,10 @@ export default function SurfaceView() {
           )}
         </div>
         {data && !loading && (
-          <span className="label-caps">
+          <span
+            className="label-caps"
+            title="IVs solved per contract via Newton-Raphson from mid quotes."
+          >
             {data.stats.solved} / {data.stats.attempted} CONTRACTS SOLVED
             {" · "}DELAYED
             {" · "}AS OF {time}
@@ -114,55 +159,69 @@ export default function SurfaceView() {
         )}
       </div>
 
-      {/* Loading */}
-      {loading && !data && (
-        <p className="label-caps">LOADING SURFACE…</p>
-      )}
-
-      {/* Error */}
+      {/* ── Error ───────────────────────────────────────────────────────── */}
       {!loading && error && (
-        <p className="label-caps" style={{ color: "var(--color-neg)" }}>
-          {error}
-        </p>
+        <div style={{ height: "70vh", display: "flex", alignItems: "center" }}>
+          <span className="label-caps" style={{ color: "var(--color-label)" }}>
+            {error}
+          </span>
+        </div>
       )}
 
-      {/* Plot */}
-      {data && !error && (
+      {/* ── Plot ────────────────────────────────────────────────────────── */}
+      {/* SolvingPlaceholder fills 70vh while loading; SurfacePlot replaces it */}
+      {!error && (
         <>
-          <SurfacePlot
-            points={data.points}
-            ticker={ticker}
-          />
+          {(loading && !data) ? (
+            <SolvingPlaceholder />
+          ) : data ? (
+            <SurfacePlot
+              points={data.points}
+              ticker={ticker}
+              spot={data.spot}
+            />
+          ) : null}
 
-          {/* Skew readout */}
+          {/* ── Skew readout ───────────────────────────────────────────── */}
           {skew && (
             <div
-              className="label-caps"
-              style={{ marginTop: "1.25rem", display: "flex", gap: "2rem" }}
+              style={{
+                borderTop:   "1px solid var(--color-edge)",
+                marginTop:   "24px",
+                paddingTop:  "24px",
+                display:     "flex",
+                gap:         "2rem",
+                fontSize:    "13px",
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+              }}
             >
-              <span>
+              <span style={{ color: "var(--color-label)" }}>
                 ATM{" "}
                 <span className="num" style={{ color: "#E7E7EA", fontSize: "13px" }}>
                   {skew.atmIv.toFixed(1)}%
                 </span>
                 {" "}
-                <span style={{ opacity: 0.5 }}>
+                <span style={{ opacity: 0.45, fontSize: "11px" }}>
                   ({skew.atmStrike} · {skew.dte}d)
                 </span>
               </span>
-              <span>
+
+              <span style={{ color: "var(--color-label)" }}>
                 10% OTM PUT{" "}
                 <span className="num" style={{ color: "#E7E7EA", fontSize: "13px" }}>
                   {skew.otmIv.toFixed(1)}%
                 </span>
                 {" "}
-                <span style={{ opacity: 0.5 }}>({skew.otmStrike})</span>
+                <span style={{ opacity: 0.45, fontSize: "11px" }}>({skew.otmStrike})</span>
               </span>
-              <span>
+
+              <span style={{ color: "var(--color-label)" }}>
                 SKEW{" "}
-                <span className="num" style={{ color: "var(--color-accent)", fontSize: "13px" }}>
-                  +{skew.spread.toFixed(1)} pts
+                <span className="num" style={{ color: "var(--color-accent)", fontSize: "15px" }}>
+                  +{skew.spread.toFixed(1)}
                 </span>
+                {" pts"}
               </span>
             </div>
           )}

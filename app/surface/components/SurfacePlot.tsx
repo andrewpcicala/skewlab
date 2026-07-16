@@ -4,13 +4,20 @@ import { useMotionSafe } from "@/lib/motion";
 import type { SurfacePoint } from "@/lib/pricing/surface";
 
 // ── Camera constants ──────────────────────────────────────────────────────────
-const EYE_D  = { x: 1.5, y: -1.5, z: 0.8 };
-const UP     = { x: 0, y: 0, z: 1 };
-const CTR    = { x: 0, y: 0, z: 0 };
+// Three-quarter view, ~30° elevation, low-strike/front-DTE corner nearest viewer.
+// Angle: atan2(-1.5, -1.5) = -135°; elevation: atan2(1.22, √(1.5²+1.5²)) ≈ 30°.
+// This frames the put wall (rising steeply on the left) AND the term structure
+// receding into the background — both legible at first paint.
+const EYE_D     = { x: -1.5, y: -1.5, z: 1.22 };
+const EYE_START = { x: EYE_D.x * 1.08, y: EYE_D.y * 1.08, z: EYE_D.z * 1.08 };
+const UP        = { x: 0, y: 0, z: 1 };
+const CTR       = { x: 0, y: 0, z: 0 };
+
 const ORBIT_MS = 60_000;
+const ENTER_MS = 900;
 const EASE_MS  = 600;
 const ORBIT_R  = Math.sqrt(EYE_D.x ** 2 + EYE_D.y ** 2);
-const ORBIT_A0 = Math.atan2(EYE_D.y, EYE_D.x);
+const ORBIT_A0 = Math.atan2(EYE_D.y, EYE_D.x); // -135°, orbit resumes from home angle
 
 const COLORSCALE = [
   [0.0, "#141418"],
@@ -21,16 +28,22 @@ const COLORSCALE = [
 const MONO       = "JetBrains Mono, monospace";
 const AXIS_FONT  = { family: MONO, size: 10, color: "#8A8A93" };
 const TITLE_FONT = { family: MONO, size: 11, color: "#8A8A93" };
-
 const AXIS_STYLE = {
   gridcolor:       "#26262C",
   showzeroline:    false,
   zeroline:        false,
   tickfont:        AXIS_FONT,
   backgroundcolor: "rgba(0,0,0,0)",
+  nticks:          5,
 };
 
 const easeOutCubic = (t: number) => 1 - (1 - t) ** 3;
+
+function percentile(sorted: number[], p: number): number {
+  const i  = (sorted.length - 1) * p;
+  const lo = Math.floor(i);
+  return sorted[lo] + (sorted[Math.ceil(i)] - sorted[lo]) * (i - lo);
+}
 
 // ── Grid builder ──────────────────────────────────────────────────────────────
 function buildGrid(pts: SurfacePoint[]) {
@@ -55,46 +68,48 @@ function buildGrid(pts: SurfacePoint[]) {
 interface Props {
   points: SurfacePoint[];
   ticker: string;
+  spot:   number;
 }
 
-export default function SurfacePlot({ points, ticker }: Props) {
+type Phase = "entering" | "easing" | "orbiting" | "paused";
+
+export default function SurfacePlot({ points, ticker, spot }: Props) {
   const { reduced } = useMotionSafe();
   const divRef   = useRef<HTMLDivElement>(null);
   const seqRef   = useRef(0);
   const stateRef = useRef({
-    P:     null as unknown,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    P:     null as any,
     ready: false,
     cam: {
-      paused:    false,
-      easing:    false,
-      easeStart: 0,
-      easeFrom:  { ...EYE_D },
-      orbitT0:   0,
-      rafId:     0,
-      stops:     [] as (() => void)[],
+      phase:      "entering" as Phase,
+      phaseStart: 0,
+      easeFrom:   { ...EYE_D },
+      orbitT0:    0,
+      rafId:      0,
+      stops:      [] as (() => void)[],
     },
   });
 
-  // Purge on unmount only
+  // Purge Plotly on component unmount
   useEffect(() => {
     return () => {
       const { P, cam } = stateRef.current;
       cancelAnimationFrame(cam.rafId);
       cam.stops.forEach(f => f());
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if (P && divRef.current) (P as any).purge(divRef.current);
+      if (P && divRef.current) P.purge(divRef.current);
       stateRef.current.ready = false;
     };
   }, []);
 
-  // Plot / update whenever points change
+  // Rebuild whenever points change (triggered by ticker switch or first load)
   useEffect(() => {
     if (!points.length) return;
     const seq = ++seqRef.current;
 
     (async () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let P = stateRef.current.P as any;
+      let P: any = stateRef.current.P;
       if (!P) {
         const mod = await import("plotly.js-dist-min");
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -103,31 +118,63 @@ export default function SurfacePlot({ points, ticker }: Props) {
       }
       if (seqRef.current !== seq || !divRef.current) return;
 
-      const div      = divRef.current;
+      const div                = divRef.current;
       const { cam, ready: isUpdate } = stateRef.current;
 
-      // Snapshot camera before re-plotting (for ease-from on ticker switch)
+      // Snapshot camera before re-plotting (ease-from on ticker switch)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const prevEye = isUpdate ? ((div as any)._fullLayout?.scene?.camera?.eye ?? EYE_D) : EYE_D;
 
-      // Kill previous orbit before starting new one
       cancelAnimationFrame(cam.rafId);
       cam.stops.forEach(f => f());
       cam.stops = [];
 
+      // ── Build traces ────────────────────────────────────────────────────
       const { strikes, dtes, z } = buildGrid(points);
 
-      const trace = {
-        type:       "surface",
-        x:          strikes,
-        y:          dtes,
+      // Adaptive color range: 5th/95th percentile so every ticker fills the ramp
+      const sortedIvs = points.map(p => p.iv * 100).sort((a, b) => a - b);
+      const cmin = percentile(sortedIvs, 0.05);
+      const cmax = percentile(sortedIvs, 0.95);
+      const cmid = (cmin + cmax) / 2;
+
+      // ATM IV for the hairline contour (front expiry, strike nearest spot)
+      const frontExp = points.reduce((b, p) => p.dte < b.dte ? p : b).expiry;
+      const frontPts = points.filter(p => p.expiry === frontExp);
+      const atmPt    = frontPts.reduce((b, p) =>
+        Math.abs(p.strike - spot) < Math.abs(b.strike - spot) ? p : b
+      );
+      const atmIvPct = atmPt.iv * 100;
+
+      // Front expiry smile — the "live edge" line trace
+      const frontSmile = [...frontPts].sort((a, b) => a.strike - b.strike);
+      const frontDte   = Math.round(frontSmile[0]?.dte ?? 0);
+
+      const surfaceTrace = {
+        type:        "surface",
+        x:           strikes,
+        y:           dtes,
         z,
-        colorscale: COLORSCALE,
-        showscale:  true,
+        colorscale:  COLORSCALE,
+        cmin,
+        cmax,
+        showscale:   true,
+        connectgaps: true,
+        opacity:     1.0,
         colorbar: {
-          title:       { text: "IV %", font: TITLE_FONT, side: "right" },
-          tickfont:    AXIS_FONT,
-          tickformat:  ".0f",
+          title:    { text: "IV %", font: TITLE_FONT, side: "right" },
+          tickfont: AXIS_FONT,
+          tickmode: "array",
+          tickvals: [
+            Math.round(cmin),
+            Math.round(cmid),
+            Math.round(cmax),
+          ],
+          ticktext: [
+            `${Math.round(cmin)}%`,
+            `${Math.round(cmid)}%`,
+            `${Math.round(cmax)}%`,
+          ],
           thickness:   8,
           len:         0.5,
           bgcolor:     "rgba(0,0,0,0)",
@@ -141,15 +188,50 @@ export default function SurfacePlot({ points, ticker }: Props) {
           bordercolor: "#26262C",
           font:        { family: MONO, size: 11, color: "#E7E7EA" },
         },
-        connectgaps: false,
-        opacity:     0.95,
+        // Brushed-metal lighting: visible form, near-zero specular shine
+        lighting: {
+          ambient:  0.85,
+          diffuse:  0.4,
+          specular: 0.05,
+          roughness: 0.9,
+          fresnel:  0.1,
+        },
+        lightposition: { x: 100, y: 100, z: 1000 },
+        contours: {
+          x: { show: false, highlight: false },
+          y: { show: false, highlight: false },
+          z: {
+            // Single hairline at ATM IV — whispers the vol floor, doesn't draw
+            show:        true,
+            start:       atmIvPct,
+            end:         atmIvPct + 0.001,
+            size:        1,
+            color:       "#26262C",
+            width:       1,
+            highlight:   false,
+            usecolormap: false,
+          },
+        },
       };
 
+      // Front expiry smile — 1px accent line, the "live edge" of the surface
+      const smileTrace = {
+        type:       "scatter3d",
+        x:          frontSmile.map(p => p.strike),
+        y:          frontSmile.map(() => frontDte),
+        z:          frontSmile.map(p => +(p.iv * 100).toFixed(2)),
+        mode:       "lines",
+        line:       { color: "rgba(59,130,246,0.6)", width: 1.5 },
+        hoverinfo:  "skip",
+        showlegend: false,
+      };
+
+      // ── Layout ──────────────────────────────────────────────────────────
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const layout: any = {
         paper_bgcolor: "transparent",
         plot_bgcolor:  "transparent",
-        margin:        { l: 0, r: 40, t: 0, b: 0 },
+        margin:        { l: 0, r: 48, t: 0, b: 0 },
         scene: {
           bgcolor: "rgba(0,0,0,0)",
           xaxis:   { ...AXIS_STYLE, title: { text: "STRIKE", font: TITLE_FONT } },
@@ -160,12 +242,19 @@ export default function SurfacePlot({ points, ticker }: Props) {
         autosize: true,
       };
 
-      // Set default camera on first load; preserve current on update
-      if (!isUpdate) {
+      // Camera for first load: EYE_START (entrance animation begins here).
+      // On update (ticker switch): omit camera so Plotly preserves current position.
+      // Reduced motion: always set to home immediately.
+      if (reduced) {
         layout.scene.camera = { eye: { ...EYE_D }, up: UP, center: CTR };
+      } else if (!isUpdate) {
+        layout.scene.camera = { eye: { ...EYE_START }, up: UP, center: CTR };
       }
 
-      await P.react(div, [trace], layout, {
+      // Opacity: start invisible on first load; updates leave div visible
+      if (!isUpdate && !reduced) div.style.opacity = "0";
+
+      await P.react(div, [surfaceTrace, smileTrace], layout, {
         displaylogo:          false,
         displayModeBar:       "hover",
         modeBarButtonsToKeep: ["resetCameraLastSave3d"],
@@ -175,64 +264,86 @@ export default function SurfacePlot({ points, ticker }: Props) {
       if (seqRef.current !== seq) return;
       stateRef.current.ready = true;
 
-      // ── Orbit / ease camera ─────────────────────────────────────────────
-      if (!reduced) {
-        if (isUpdate) {
-          cam.easeFrom  = { x: prevEye.x, y: prevEye.y, z: prevEye.z };
-          cam.easeStart = performance.now();
-          cam.easing    = true;
-          cam.paused    = false;
-        } else {
-          cam.easing  = false;
-          cam.paused  = false;
-          cam.orbitT0 = performance.now();
-        }
+      // ── Motion ──────────────────────────────────────────────────────────
+      if (reduced) {
+        div.style.opacity = "1";
+        return;
+      }
 
-        const tick = (now: number) => {
-          if (!divRef.current) return;
-          if (cam.easing) {
-            const t   = Math.min((now - cam.easeStart) / EASE_MS, 1);
+      if (!isUpdate) {
+        cam.phase      = "entering";
+        cam.phaseStart = performance.now();
+      } else {
+        cam.easeFrom   = { x: prevEye.x, y: prevEye.y, z: prevEye.z };
+        cam.phase      = "easing";
+        cam.phaseStart = performance.now();
+      }
+
+      const tick = (now: number) => {
+        const d = divRef.current;
+        if (!d) return;
+
+        switch (cam.phase) {
+          case "entering": {
+            const t   = Math.min((now - cam.phaseStart) / ENTER_MS, 1);
+            const e   = easeOutCubic(t);
+            const eye = {
+              x: EYE_START.x + (EYE_D.x - EYE_START.x) * e,
+              y: EYE_START.y + (EYE_D.y - EYE_START.y) * e,
+              z: EYE_START.z + (EYE_D.z - EYE_START.z) * e,
+            };
+            P.relayout(d, { "scene.camera": { eye, up: UP, center: CTR } });
+            d.style.opacity = String(e);
+            if (t >= 1) {
+              d.style.opacity = "1";
+              cam.phase       = "orbiting";
+              cam.orbitT0     = now;
+            }
+            break;
+          }
+          case "easing": {
+            const t   = Math.min((now - cam.phaseStart) / EASE_MS, 1);
             const e   = easeOutCubic(t);
             const eye = {
               x: cam.easeFrom.x + (EYE_D.x - cam.easeFrom.x) * e,
               y: cam.easeFrom.y + (EYE_D.y - cam.easeFrom.y) * e,
               z: cam.easeFrom.z + (EYE_D.z - cam.easeFrom.z) * e,
             };
-            P.relayout(div, { "scene.camera": { eye, up: UP, center: CTR } });
-            if (t >= 1) {
-              cam.easing  = false;
-              cam.paused  = false;
-              cam.orbitT0 = now;
-            }
-          } else if (!cam.paused) {
+            P.relayout(d, { "scene.camera": { eye, up: UP, center: CTR } });
+            if (t >= 1) { cam.phase = "orbiting"; cam.orbitT0 = now; }
+            break;
+          }
+          case "orbiting": {
             const ang = ORBIT_A0 + ((now - cam.orbitT0) / ORBIT_MS) * 2 * Math.PI;
-            P.relayout(div, {
+            P.relayout(d, {
               "scene.camera": {
                 eye:    { x: ORBIT_R * Math.cos(ang), y: ORBIT_R * Math.sin(ang), z: EYE_D.z },
                 up:     UP,
                 center: CTR,
               },
             });
+            break;
           }
-          cam.rafId = requestAnimationFrame(tick);
-        };
+          case "paused":
+            break;
+        }
         cam.rafId = requestAnimationFrame(tick);
+      };
+      cam.rafId = requestAnimationFrame(tick);
 
-        const stop = () => { cam.paused = true; };
-        div.addEventListener("pointerdown", stop);
-        div.addEventListener("wheel",      stop, { passive: true });
-        div.addEventListener("touchstart", stop, { passive: true });
-        cam.stops = [
-          () => div.removeEventListener("pointerdown", stop),
-          () => div.removeEventListener("wheel",       stop),
-          () => div.removeEventListener("touchstart",  stop),
-        ];
-      }
+      const stop = () => { cam.phase = "paused"; };
+      div.addEventListener("pointerdown", stop);
+      div.addEventListener("wheel",       stop, { passive: true });
+      div.addEventListener("touchstart",  stop, { passive: true });
+      cam.stops = [
+        () => div.removeEventListener("pointerdown", stop),
+        () => div.removeEventListener("wheel",       stop),
+        () => div.removeEventListener("touchstart",  stop),
+      ];
     })();
-  // points reference is stable between renders (parent setState); ticker
-  // drives re-fetch so new points always arrive with new ticker
+  // points is stable between renders (React state ref); ticker drives re-fetch
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [points, ticker, reduced]);
+  }, [points, ticker, reduced, spot]);
 
   return <div ref={divRef} style={{ width: "100%", height: "70vh" }} />;
 }

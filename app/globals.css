@@ -37,3 +37,12 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* Surface loading animation: three dots blink in sequence */
+@keyframes dot-blink {
+  0%, 100% { opacity: 0.15; }
+  50%       { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dot-blink { animation: none !important; opacity: 1 !important; }
+}
