@@ -20,3 +20,13 @@ const cachedProvider: MarketDataProvider = {
 export function getProvider(): MarketDataProvider {
   return cachedProvider;
 }
+
+// Surface chain — separate cache key so chain and surface don't evict each other.
+export async function getSurfaceChain(underlying: string): Promise<OptionChain> {
+  const key = `surface:${underlying}`;
+  const cached = getCachedChain(key);
+  if (cached) return cached;
+  const chain = await provider.getSurfaceChain(underlying);
+  setCachedChain(key, chain);
+  return chain;
+}

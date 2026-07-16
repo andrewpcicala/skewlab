@@ -172,3 +172,61 @@ the solver: (1) market price ≤ 0 — a quote error or a worthless option;
 (2) T ≤ 0 — the option is expired; (3) market price below forward intrinsic
 (= max(S·e^{−qT} − K·e^{−rT}, 0) for a call) — this is an arbitrage
 violation; no σ in [0, ∞) can produce it.
+
+---
+
+### Why the smile exists
+
+Black-Scholes assumes a constant, log-normally distributed return process with
+no jumps. Real equity prices can gap down catastrophically (crashes, macro
+prints, earnings). Out-of-the-money put buyers are paying for protection against
+those left-tail events; sellers demand a premium above what a log-normal model
+would predict. This extra premium shows up as higher implied volatility for
+low-strike puts relative to ATM. The resulting shape — IV falling as you move
+from low-strike puts to ATM, then rising again for high-strike calls — is called
+the volatility smile; for equity indices the left side is dramatically steeper,
+which traders call the skew or smirk.
+
+The shape varies by expiry (the term structure of vol): short-dated options
+near a known event (earnings, Fed meeting) spike because the expected move
+is compressed into a short window. Long-dated options have smoother, flatter
+smiles because random events average out over time and the known catalysts are
+diluted across many days.
+
+---
+
+### Why the surface uses OTM contracts only
+
+The vol surface maps (strike, expiry) → implied vol. For any given (strike,
+expiry) there are two contracts: a call and a put. By put-call parity they must
+imply the same vol in a perfect market; in practice microstructure noise makes
+them differ slightly. Using both would mean picking one or averaging — adding
+unnecessary complexity and potentially introducing inconsistencies.
+
+Convention chooses OTM because OTM contracts have the most vol content per
+dollar of premium. An ITM call is largely intrinsic value; its small time-value
+component means its market quote is dominated by spot exposure rather than vol
+expectations, and a $0.01 bid-ask spread is a much larger fraction of the
+time-value, amplifying IV noise. OTM options spend their entire market value
+on time value and vol, so their quotes are efficient vol signals. In practice,
+the ITM put and the OTM call at the same (strike, expiry) imply nearly the same
+IV anyway — using OTM loses almost no information and gains cleaner data.
+
+---
+
+### Why IVs are solved from mid, and why no-mid contracts are excluded
+
+Mid = (bid + ask) / 2 is the best available estimate of fair value when both
+sides are live. It anchors the IV to current market consensus: a market maker
+quoting a tight spread is expressing a confident view on fair vol.
+
+Close prices are the previous day's settlement. They carry yesterday's vol
+expectations, yesterday's spot level, and yesterday's rates. After a large
+overnight move in the underlying, stale closes are simply wrong as proxies
+for current IV; a contract that closed at $2.50 yesterday when SPY was at 750
+now has a completely different theoretical value if SPY opened at 730. Building
+a surface from stale closes produces a scrambled, self-inconsistent patchwork
+of old and new data — particularly harmful at wings where volume is sparse and
+the last trade could be hours old. The surface code requires a live mid
+precisely to avoid this. Contracts without a live two-sided market are excluded
+rather than approximated.
