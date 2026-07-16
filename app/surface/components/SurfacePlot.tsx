@@ -6,18 +6,14 @@ import type { SurfacePoint } from "@/lib/pricing/surface";
 // ── Camera constants ──────────────────────────────────────────────────────────
 // Three-quarter view, ~30° elevation, low-strike/front-DTE corner nearest viewer.
 // Angle: atan2(-1.5, -1.5) = -135°; elevation: atan2(1.22, √(1.5²+1.5²)) ≈ 30°.
-// This frames the put wall (rising steeply on the left) AND the term structure
-// receding into the background — both legible at first paint.
-const EYE_D     = { x: -1.5, y: -1.5, z: 1.22 };
-const EYE_START = { x: EYE_D.x * 1.08, y: EYE_D.y * 1.08, z: EYE_D.z * 1.08 };
-const UP        = { x: 0, y: 0, z: 1 };
-const CTR       = { x: 0, y: 0, z: 0 };
+const EYE_D  = { x: -1.5, y: -1.5, z: 1.22 };
+const UP     = { x: 0, y: 0, z: 1 };
+const CTR    = { x: 0, y: 0, z: 0 };
 
 const ORBIT_MS = 60_000;
-const ENTER_MS = 900;
 const EASE_MS  = 600;
 const ORBIT_R  = Math.sqrt(EYE_D.x ** 2 + EYE_D.y ** 2);
-const ORBIT_A0 = Math.atan2(EYE_D.y, EYE_D.x); // -135°, orbit resumes from home angle
+const ORBIT_A0 = Math.atan2(EYE_D.y, EYE_D.x); // -135°
 
 const COLORSCALE = [
   [0.0, "#141418"],
@@ -71,7 +67,10 @@ interface Props {
   spot:   number;
 }
 
-type Phase = "entering" | "easing" | "orbiting" | "paused";
+// "entering" is intentionally absent: the surface renders at full opacity the
+// moment data paints. The only animated transitions are the ticker-switch ease
+// (camera → home over 600ms) and the idle orbit.
+type Phase = "easing" | "orbiting" | "paused";
 
 export default function SurfacePlot({ points, ticker, spot }: Props) {
   const { reduced } = useMotionSafe();
@@ -82,7 +81,7 @@ export default function SurfacePlot({ points, ticker, spot }: Props) {
     P:     null as any,
     ready: false,
     cam: {
-      phase:      "entering" as Phase,
+      phase:      "paused" as Phase,
       phaseStart: 0,
       easeFrom:   { ...EYE_D },
       orbitT0:    0,
@@ -91,7 +90,7 @@ export default function SurfacePlot({ points, ticker, spot }: Props) {
     },
   });
 
-  // Purge Plotly on component unmount
+  // Purge Plotly on component unmount only
   useEffect(() => {
     return () => {
       const { P, cam } = stateRef.current;
@@ -102,7 +101,7 @@ export default function SurfacePlot({ points, ticker, spot }: Props) {
     };
   }, []);
 
-  // Rebuild whenever points change (triggered by ticker switch or first load)
+  // Rebuild whenever points change (new ticker data or first load)
   useEffect(() => {
     if (!points.length) return;
     const seq = ++seqRef.current;
@@ -118,10 +117,10 @@ export default function SurfacePlot({ points, ticker, spot }: Props) {
       }
       if (seqRef.current !== seq || !divRef.current) return;
 
-      const div                = divRef.current;
+      const div = divRef.current;
       const { cam, ready: isUpdate } = stateRef.current;
 
-      // Snapshot camera before re-plotting (ease-from on ticker switch)
+      // Snapshot camera before re-plotting (ease-from source on ticker switch)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const prevEye = isUpdate ? ((div as any)._fullLayout?.scene?.camera?.eye ?? EYE_D) : EYE_D;
 
@@ -129,16 +128,14 @@ export default function SurfacePlot({ points, ticker, spot }: Props) {
       cam.stops.forEach(f => f());
       cam.stops = [];
 
-      // ── Build traces ────────────────────────────────────────────────────
+      // ── Traces ──────────────────────────────────────────────────────────
       const { strikes, dtes, z } = buildGrid(points);
 
-      // Adaptive color range: 5th/95th percentile so every ticker fills the ramp
       const sortedIvs = points.map(p => p.iv * 100).sort((a, b) => a - b);
       const cmin = percentile(sortedIvs, 0.05);
       const cmax = percentile(sortedIvs, 0.95);
       const cmid = (cmin + cmax) / 2;
 
-      // ATM IV for the hairline contour (front expiry, strike nearest spot)
       const frontExp = points.reduce((b, p) => p.dte < b.dte ? p : b).expiry;
       const frontPts = points.filter(p => p.expiry === frontExp);
       const atmPt    = frontPts.reduce((b, p) =>
@@ -146,7 +143,6 @@ export default function SurfacePlot({ points, ticker, spot }: Props) {
       );
       const atmIvPct = atmPt.iv * 100;
 
-      // Front expiry smile — the "live edge" line trace
       const frontSmile = [...frontPts].sort((a, b) => a.strike - b.strike);
       const frontDte   = Math.round(frontSmile[0]?.dte ?? 0);
 
@@ -165,16 +161,8 @@ export default function SurfacePlot({ points, ticker, spot }: Props) {
           title:    { text: "IV %", font: TITLE_FONT, side: "right" },
           tickfont: AXIS_FONT,
           tickmode: "array",
-          tickvals: [
-            Math.round(cmin),
-            Math.round(cmid),
-            Math.round(cmax),
-          ],
-          ticktext: [
-            `${Math.round(cmin)}%`,
-            `${Math.round(cmid)}%`,
-            `${Math.round(cmax)}%`,
-          ],
+          tickvals: [Math.round(cmin), Math.round(cmid), Math.round(cmax)],
+          ticktext: [`${Math.round(cmin)}%`, `${Math.round(cmid)}%`, `${Math.round(cmax)}%`],
           thickness:   8,
           len:         0.5,
           bgcolor:     "rgba(0,0,0,0)",
@@ -188,20 +176,18 @@ export default function SurfacePlot({ points, ticker, spot }: Props) {
           bordercolor: "#26262C",
           font:        { family: MONO, size: 11, color: "#E7E7EA" },
         },
-        // Brushed-metal lighting: visible form, near-zero specular shine
         lighting: {
-          ambient:  0.85,
-          diffuse:  0.4,
-          specular: 0.05,
+          ambient:   0.85,
+          diffuse:   0.4,
+          specular:  0.05,
           roughness: 0.9,
-          fresnel:  0.1,
+          fresnel:   0.1,
         },
         lightposition: { x: 100, y: 100, z: 1000 },
         contours: {
           x: { show: false, highlight: false },
           y: { show: false, highlight: false },
           z: {
-            // Single hairline at ATM IV — whispers the vol floor, doesn't draw
             show:        true,
             start:       atmIvPct,
             end:         atmIvPct + 0.001,
@@ -214,7 +200,6 @@ export default function SurfacePlot({ points, ticker, spot }: Props) {
         },
       };
 
-      // Front expiry smile — 1px accent line, the "live edge" of the surface
       const smileTrace = {
         type:       "scatter3d",
         x:          frontSmile.map(p => p.strike),
@@ -242,17 +227,12 @@ export default function SurfacePlot({ points, ticker, spot }: Props) {
         autosize: true,
       };
 
-      // Camera for first load: EYE_START (entrance animation begins here).
-      // On update (ticker switch): omit camera so Plotly preserves current position.
-      // Reduced motion: always set to home immediately.
-      if (reduced) {
+      // First load: set camera to home. Ticker switch: omit camera so Plotly
+      // preserves the current position for the ease-from snapshot.
+      // Reduced motion: always pin camera to home.
+      if (reduced || !isUpdate) {
         layout.scene.camera = { eye: { ...EYE_D }, up: UP, center: CTR };
-      } else if (!isUpdate) {
-        layout.scene.camera = { eye: { ...EYE_START }, up: UP, center: CTR };
       }
-
-      // Opacity: start invisible on first load; updates leave div visible
-      if (!isUpdate && !reduced) div.style.opacity = "0";
 
       await P.react(div, [surfaceTrace, smileTrace], layout, {
         displaylogo:          false,
@@ -261,22 +241,23 @@ export default function SurfacePlot({ points, ticker, spot }: Props) {
         responsive:           true,
       });
 
+      // Bail if a newer effect superseded this one
       if (seqRef.current !== seq) return;
       stateRef.current.ready = true;
 
-      // ── Motion ──────────────────────────────────────────────────────────
-      if (reduced) {
-        div.style.opacity = "1";
-        return;
-      }
+      // No motion in reduced mode; surface is already at home from the layout above
+      if (reduced) return;
 
-      if (!isUpdate) {
-        cam.phase      = "entering";
-        cam.phaseStart = performance.now();
-      } else {
+      // ── Camera motion ────────────────────────────────────────────────────
+      if (isUpdate) {
+        // Ticker switch: ease from where the user left the camera back to home
         cam.easeFrom   = { x: prevEye.x, y: prevEye.y, z: prevEye.z };
         cam.phase      = "easing";
         cam.phaseStart = performance.now();
+      } else {
+        // First load: start orbiting from home immediately
+        cam.phase   = "orbiting";
+        cam.orbitT0 = performance.now();
       }
 
       const tick = (now: number) => {
@@ -284,23 +265,6 @@ export default function SurfacePlot({ points, ticker, spot }: Props) {
         if (!d) return;
 
         switch (cam.phase) {
-          case "entering": {
-            const t   = Math.min((now - cam.phaseStart) / ENTER_MS, 1);
-            const e   = easeOutCubic(t);
-            const eye = {
-              x: EYE_START.x + (EYE_D.x - EYE_START.x) * e,
-              y: EYE_START.y + (EYE_D.y - EYE_START.y) * e,
-              z: EYE_START.z + (EYE_D.z - EYE_START.z) * e,
-            };
-            P.relayout(d, { "scene.camera": { eye, up: UP, center: CTR } });
-            d.style.opacity = String(e);
-            if (t >= 1) {
-              d.style.opacity = "1";
-              cam.phase       = "orbiting";
-              cam.orbitT0     = now;
-            }
-            break;
-          }
           case "easing": {
             const t   = Math.min((now - cam.phaseStart) / EASE_MS, 1);
             const e   = easeOutCubic(t);
@@ -341,7 +305,6 @@ export default function SurfacePlot({ points, ticker, spot }: Props) {
         () => div.removeEventListener("touchstart",  stop),
       ];
     })();
-  // points is stable between renders (React state ref); ticker drives re-fetch
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [points, ticker, reduced, spot]);
 
