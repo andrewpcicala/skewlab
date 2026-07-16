@@ -25,12 +25,13 @@ export default function DivergenceRow({ modelPrice, quote, userVolPct, ivPct }: 
   const pct   = (diff / marketPrice) * 100;
   const isPos = diff >= 0;
   const colorClass = isPos ? "text-pos" : "text-neg";
-  const sign  = isPos ? "+" : "";
+  const sign  = isPos ? "+" : "−";
 
   const absDiff = Math.abs(diff).toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+  const absPct = Math.abs(pct).toFixed(1);
 
   return (
     <div>
@@ -42,7 +43,7 @@ export default function DivergenceRow({ modelPrice, quote, userVolPct, ivPct }: 
           {sign}${absDiff}
         </span>
         <span className={`num text-sm ${colorClass}`}>
-          {sign}{pct.toFixed(1)}%
+          {sign}{absPct}%
         </span>
       </div>
       <p className="label-caps text-label">

@@ -45,8 +45,9 @@ function parseTicker(
   };
 }
 
-function isoToday(): string {
-  return new Date().toISOString().slice(0, 10);
+function isoTodayET(): string {
+  // en-CA gives ISO YYYY-MM-DD; America/New_York handles EST/EDT automatically
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
 }
 
 // ── Provider ───────────────────────────────────────────────────────────────
@@ -110,7 +111,7 @@ export class AlpacaProvider implements MarketDataProvider {
         limit:              "100",
         strike_price_gte:   String(lo),
         strike_price_lte:   String(hi),
-        expiration_date_gte: isoToday(),
+        expiration_date_gte: isoTodayET(),
       });
       if (pageToken) params.set("page_token", pageToken);
 
@@ -127,7 +128,8 @@ export class AlpacaProvider implements MarketDataProvider {
         const ask  = snap.latestQuote?.ap && snap.latestQuote.ap > 0
           ? snap.latestQuote.ap : null;
         const mid  = bid !== null && ask !== null ? (bid + ask) / 2 : null;
-        const last = snap.latestTrade?.p ?? null; // null when untraded; never fall back to close
+        const last = snap.latestTrade?.p && snap.latestTrade.p > 0
+          ? snap.latestTrade.p : null;
 
         quotes.push({
           symbol:       ticker,
@@ -155,14 +157,20 @@ export class AlpacaProvider implements MarketDataProvider {
       }
     } while (pageToken);
 
-    // quoteBasis: "mid" when >50% of contracts have non-null mids, else "close"
-    const withMid = quotes.filter((q) => q.mid !== null).length;
-    const quoteBasis: "mid" | "close" = withMid > quotes.length / 2 ? "mid" : "close";
+    // Drop any expiry that is strictly before today in ET.
+    // The API query already filters this, but the server-side cache can serve
+    // data fetched earlier in the day that contained today's (now-expired) expiry.
+    const today = isoTodayET();
+    const liveQuotes = quotes.filter((q) => q.expiry >= today);
 
-    const expiries = [...new Set(quotes.map((q) => q.expiry))].sort();
+    // quoteBasis: "mid" when >50% of contracts have non-null mids, else "close"
+    const withMid = liveQuotes.filter((q) => q.mid !== null).length;
+    const quoteBasis: "mid" | "close" = withMid > liveQuotes.length / 2 ? "mid" : "close";
+
+    const expiries = [...new Set(liveQuotes.map((q) => q.expiry))].sort();
 
     console.log(
-      `[alpaca] ${underlying}: ${quotes.length} contracts, ` +
+      `[alpaca] ${underlying}: ${liveQuotes.length} contracts, ` +
       `${expiries.length} expiries, ${pages} page(s), quoteBasis=${quoteBasis}` +
       (truncated ? " [TRUNCATED]" : "")
     );
@@ -172,7 +180,7 @@ export class AlpacaProvider implements MarketDataProvider {
       spot,
       asOf:        new Date().toISOString(),
       expiries,
-      quotes,
+      quotes:      liveQuotes,
       dataQuality: "delayed",
       quoteBasis,
       truncated,
