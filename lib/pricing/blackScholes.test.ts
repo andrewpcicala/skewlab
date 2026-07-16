@@ -100,4 +100,79 @@ for (let n = 0; n < 20; n++) {
   assert(itmCall.gamma === 0 && itmCall.vega === 0 && itmCall.theta === 0, `T=0 greeks are zero`);
 }
 
-console.log("All tests passed.");
+console.log("All BS tests passed.");
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Implied volatility round-trip tests
+// ══════════════════════════════════════════════════════════════════════════════
+import { solveImpliedVol } from "./impliedVol";
+
+const BASE = { spot: 100, rate: 0.05, divYield: 0 };
+
+// ── 6. Round-trip grid ─────────────────────────────────────────────────────
+// For each (trueVol, moneyness, time): price with bsPrice, solve back with
+// solveImpliedVol, assert |recoveredVol - trueVol| < 1e-4.
+// Grid: {5%, 20%, 80%, 200%} × {ATM K=100, 10% OTM K=110, 20% ITM K=80} × {1d, 30d, 1y}
+{
+  const vols  = [0.05, 0.20, 0.80, 2.00];
+  const cases = [
+    { label: "ATM",    K: 100 },
+    { label: "10%OTM", K: 110 },
+    { label: "20%ITM", K:  80 },
+  ];
+  const times = [1 / 365, 30 / 365, 1.0];
+
+  let tested = 0, skipped = 0;
+
+  for (const trueVol of vols) {
+    for (const { label, K } of cases) {
+      for (const T of times) {
+        const inp = { ...BASE, strike: K, timeYears: T };
+        const priced = bsPrice("call", { ...inp, vol: trueVol });
+
+        // Skip near-zero prices: the solver may return null or the round-trip is
+        // meaningless at floating-point precision limits.
+        if (priced.price < 1e-6) { skipped++; continue; }
+
+        // Skip when vega is machine-precision zero at trueVol — occurs for deep ITM
+        // options near expiry (d1 >> 0). Infinitely many vols produce the same price
+        // so IV is mathematically undefined and no solver can recover the true vol.
+        if (Math.abs(priced.vega) < 1e-6) { skipped++; continue; }
+
+        const result = solveImpliedVol("call", priced.price, inp);
+        assert(
+          result.iv !== null && Math.abs(result.iv - trueVol) < 1e-4,
+          `Round-trip vol=${trueVol} ${label} T=${T.toFixed(4)}: ` +
+          `iv=${result.iv?.toFixed(8)} method=${result.method} reason=${result.reason}`
+        );
+        tested++;
+      }
+    }
+  }
+  assert(tested > 0, "Round-trip grid ran no tests");
+  // skipped cases are expected (near-zero priced deep OTM short-dated at low vol)
+}
+
+// ── 7. Below-intrinsic returns null ───────────────────────────────────────
+{
+  // Call intrinsic for K=80, S=100, T=1, r=5%, q=0:
+  // forward intrinsic = max(S·e^(-qT) - K·e^(-rT), 0) = max(100 - 76.1, 0) ≈ 23.9
+  // marketPrice = 5 is well below → null with reason "below intrinsic"
+  const result = solveImpliedVol("call", 5, { spot: 100, strike: 80, timeYears: 1, rate: 0.05, divYield: 0 });
+  assert(result.iv === null, `Below intrinsic should be null, got iv=${result.iv}`);
+  assert(result.reason === "below intrinsic", `Expected "below intrinsic", got "${result.reason}"`);
+}
+
+// ── 8. Expired option returns null ─────────────────────────────────────────
+{
+  const result = solveImpliedVol("call", 5, { spot: 100, strike: 100, timeYears: 0, rate: 0.05, divYield: 0 });
+  assert(result.iv === null && result.reason === "expired", `T=0 should return expired null`);
+}
+
+// ── 9. Invalid price (≤0) returns null ────────────────────────────────────
+{
+  const result = solveImpliedVol("put", -1, { spot: 100, strike: 100, timeYears: 0.5, rate: 0.05, divYield: 0 });
+  assert(result.iv === null && result.reason === "invalid price", `Negative price should be null`);
+}
+
+console.log("All IV tests passed.");

@@ -127,3 +127,48 @@ they can be revisited.
   treated as a constant continuous rate (Merton model). Actual quarterly
   dividends require discrete dividend adjustments and differ across expiries
   that straddle an ex-date.
+
+---
+
+### Implied volatility & Newton-Raphson
+
+Implied volatility is the unique σ that makes the Black-Scholes formula
+reproduce the observed market price. It is not a volatility forecast — it is
+the market's consensus about expected future volatility, embedded in what
+people are actually willing to pay for the option right now. Because σ is the
+only unobservable input, IV is the quantity that actually matters to traders:
+the "price of vol" expressed in the same units as the BS model's σ parameter.
+
+**Why there is no closed form.** The BS price function C(σ) is smooth and
+strictly increasing in σ (vega > 0 everywhere), but cannot be inverted
+analytically. To find IV you solve the equation C(σ) = market price
+numerically.
+
+**Newton-Raphson.** Starting from an initial guess σ₀, each iteration is:
+
+    σ_{n+1} = σ_n − (C(σ_n) − target) / C′(σ_n)
+
+where C′(σ) = ∂C/∂σ = vega. Newton converges quadratically when vega is
+large (ATM options, long dated) and can diverge or stall when vega is near
+zero (deep ITM or OTM near expiry, where the price is essentially pinned at
+intrinsic regardless of σ).
+
+**The vega scaling trap.** In this codebase, `bsResult.vega` is annual vega
+divided by 100 — the P&L per one vol *point* (1 percentage-point move in σ).
+Newton's update needs the raw partial ∂C/∂σ where σ is a decimal fraction
+(0.20, not 20). That raw vega is `bsResult.vega × 100`. Using `bsResult.vega`
+directly would make each Newton step 100× too conservative, slowing convergence
+by two orders of magnitude.
+
+**Bisection fallback.** When Newton stalls (vega < 1e-10), the solver falls
+back to bisection on the interval [0.1%, 500%]. Bisection is unconditionally
+convergent given a bracketing interval and requires no derivative. Because BS
+price is strictly monotone in σ, [0.1%, 500%] always brackets any real-market
+IV. Bisection converges linearly (~3.3 bits per iteration), so 100 iterations
+give precision of 500/2¹⁰⁰ ≈ machine zero.
+
+**Pre-checks.** Three cases have no finite IV and are detected before entering
+the solver: (1) market price ≤ 0 — a quote error or a worthless option;
+(2) T ≤ 0 — the option is expired; (3) market price below forward intrinsic
+(= max(S·e^{−qT} − K·e^{−rT}, 0) for a call) — this is an arbitrage
+violation; no σ in [0, ∞) can produce it.

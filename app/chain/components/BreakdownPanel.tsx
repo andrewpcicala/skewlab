@@ -1,8 +1,9 @@
 "use client";
-import { useState, useEffect, useMemo, useRef } from "react";
-import { motion, AnimatePresence, type Variants } from "framer-motion";
-import { panelVariants, EASE_OUT, NUMBER_ROLL_DURATION, useMotionSafe } from "@/lib/motion";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { motion, AnimatePresence, useAnimate, type Variants } from "framer-motion";
+import { panelVariants, EASE_OUT, NUMBER_ROLL_DURATION, useMotionSafe, priceFlash } from "@/lib/motion";
 import { bsPrice, timeToExpiryYears } from "@/lib/pricing/blackScholes";
+import { solveImpliedVol } from "@/lib/pricing/impliedVol";
 import { RISK_FREE_RATE, DIV_YIELD_DEFAULT } from "@/lib/pricing/config";
 import type { OptionQuote } from "@/lib/data/types";
 import VolInput    from "./VolInput";
@@ -91,6 +92,7 @@ const DEFAULT_VOL = 20.0; // percent
 export default function BreakdownPanel({ quote, spot, onClose }: Props) {
   const { reduced } = useMotionSafe();
   const [vol, setVol] = useState(DEFAULT_VOL);
+  const [divergenceScope, runDivergenceFlash] = useAnimate<HTMLDivElement>();
 
   // Reset vol when the selected contract changes
   useEffect(() => { setVol(DEFAULT_VOL); }, [quote.symbol]);
@@ -102,20 +104,44 @@ export default function BreakdownPanel({ quote, spot, onClose }: Props) {
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
+  // Shared BS inputs (no vol) — stable reference across vol changes
+  const bsInput = useMemo(() => ({
+    spot,
+    strike:    quote.strike,
+    timeYears: timeToExpiryYears(quote.expiry),
+    rate:      RISK_FREE_RATE,
+    divYield:  DIV_YIELD_DEFAULT,
+  }), [spot, quote.strike, quote.expiry]);
+
   const bsResult = useMemo(
-    () =>
-      bsPrice(quote.type, {
-        spot,
-        strike:    quote.strike,
-        timeYears: timeToExpiryYears(quote.expiry),
-        rate:      RISK_FREE_RATE,
-        vol:       vol / 100,
-        divYield:  DIV_YIELD_DEFAULT,
-      }),
-    [quote, spot, vol]
+    () => bsPrice(quote.type, { ...bsInput, vol: vol / 100 }),
+    [quote.type, bsInput, vol]
   );
 
-  const dte = Math.max(timeToExpiryYears(quote.expiry) * 365, 0).toFixed(1);
+  // Solve IV from market price once per contract load (mid preferred, close fallback)
+  const ivResult = useMemo(() => {
+    const marketPrice = quote.mid ?? quote.close;
+    if (marketPrice === null || marketPrice === undefined || marketPrice <= 0) return null;
+    return solveImpliedVol(quote.type, marketPrice, bsInput);
+  }, [quote.type, quote.mid, quote.close, bsInput]);
+
+  const ivPct = ivResult?.iv != null ? ivResult.iv * 100 : null;
+
+  // Footnote switches when user vol differs from market IV by more than 0.5pp
+  const showVolDivergenceNote = ivPct !== null && Math.abs(vol - ivPct) > 0.5;
+
+  const handleMatchMarket = useCallback(() => {
+    if (ivResult?.iv == null) return;
+    const newBs = bsPrice(quote.type, { ...bsInput, vol: ivResult.iv });
+    const direction = newBs.price >= bsResult.price ? "up" : "down";
+    setVol(ivResult.iv * 100);
+    if (divergenceScope.current && !reduced) {
+      const { backgroundColor, transition } = priceFlash(direction);
+      runDivergenceFlash(divergenceScope.current, { backgroundColor }, transition);
+    }
+  }, [ivResult, bsInput, quote.type, bsResult.price, divergenceScope, runDivergenceFlash, reduced]);
+
+  const dte = Math.max(bsInput.timeYears * 365, 0).toFixed(1);
 
   // Rolling-number formatted values — animate when vol changes
   const fmtPrice = useRollingNumber(bsResult.price,  2, reduced);
@@ -150,7 +176,7 @@ export default function BreakdownPanel({ quote, spot, onClose }: Props) {
       <AnimatePresence mode="wait">
         <motion.div
           key={quote.symbol}
-          className="flex flex-col gap-5 overflow-y-auto pb-6"
+          className="flex flex-col gap-6 overflow-y-auto pb-6"
           initial={reduced ? false : "initial"}
           animate="animate"
           exit={{ opacity: 0, transition: { duration: 0.1 } }}
@@ -199,17 +225,29 @@ export default function BreakdownPanel({ quote, spot, onClose }: Props) {
                   </div>
                 </Row>
               </div>
+              {ivPct !== null && (
+                <div className="mt-2">
+                  <button
+                    onClick={handleMatchMarket}
+                    className="label-caps text-accent hover:opacity-70 transition-opacity duration-[100ms] cursor-pointer"
+                  >
+                    MATCH MARKET
+                  </button>
+                </div>
+              )}
               <p className="label-caps text-label mt-2 leading-relaxed">
-                Vol is your input — the model prices YOUR vol. Phase 2 solves for the market's.
+                {showVolDivergenceNote && ivPct !== null
+                  ? `Model at your vol. Market implies ${ivPct.toFixed(1)}%.`
+                  : "Vol is your input — the model prices YOUR vol."}
               </p>
             </div>
           </motion.div>
 
           {/* 2 · MODEL ──────────────────────────────────────────────────── */}
-          <motion.div variants={section} className="border-t border-edge pt-5">
+          <motion.div variants={section} className="border-t border-edge pt-6">
             <BlockHeader>MODEL</BlockHeader>
             <p className="label-caps mb-1">THEORETICAL PRICE</p>
-            <p className="num text-2xl text-[#E7E7EA] mb-4">{fmtPrice}</p>
+            <p className="num text-2xl text-[#E7E7EA] mb-4">${fmtPrice}</p>
             <GreeksGrid
               fmtDelta={fmtDelta}
               fmtGamma={fmtGamma}
@@ -222,7 +260,7 @@ export default function BreakdownPanel({ quote, spot, onClose }: Props) {
           </motion.div>
 
           {/* 3 · MARKET ─────────────────────────────────────────────────── */}
-          <motion.div variants={section} className="border-t border-edge pt-5">
+          <motion.div variants={section} className="border-t border-edge pt-6">
             <BlockHeader>MARKET</BlockHeader>
             <div className="border-t border-edge">
               <Row label="BID">
@@ -250,12 +288,27 @@ export default function BreakdownPanel({ quote, spot, onClose }: Props) {
                   {quote.volume > 0 ? quote.volume.toLocaleString("en-US") : "—"}
                 </span>
               </Row>
+              <Row label="IMPLIED VOL">
+                <span
+                  className={`num text-sm ${ivPct !== null ? "text-[#E7E7EA]" : "text-label"}`}
+                  title={ivResult?.reason ? `IV solver: ${ivResult.reason}` : undefined}
+                >
+                  {ivPct !== null ? `${ivPct.toFixed(1)}%` : "—"}
+                </span>
+              </Row>
             </div>
           </motion.div>
 
           {/* 4 · DIVERGENCE + footer ────────────────────────────────────── */}
-          <motion.div variants={section} className="border-t border-edge pt-5">
-            <DivergenceRow modelPrice={bsResult.price} quote={quote} />
+          <motion.div variants={section} className="border-t border-edge pt-6">
+            <div ref={divergenceScope}>
+              <DivergenceRow
+                modelPrice={bsResult.price}
+                quote={quote}
+                userVolPct={vol}
+                ivPct={ivPct}
+              />
+            </div>
             <p className="label-caps text-label mt-5 leading-relaxed">
               Delayed data · American-exercise contract priced with a European
               model — expect small systematic divergence.
