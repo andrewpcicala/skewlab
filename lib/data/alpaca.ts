@@ -123,48 +123,80 @@ export class AlpacaProvider implements MarketDataProvider {
   }
 
   // ── Surface chain ──────────────────────────────────────────────────────────
-  // Fetches the option chain expiry-by-expiry, targeting the first 8 expiries
-  // with ≥ 3 DTE. Short-dated (<3 DTE) contracts are excluded from the surface:
-  // near-expiry options have erratic IV driven by microstructure noise rather
-  // than true forward-vol expectations.
+  // Fetches the option chain expiry-by-expiry, selecting expiries spread across
+  // the term structure rather than the nearest cluster of weeklies. This ensures
+  // the surface shows term structure (how vol changes with time to expiry), not
+  // just the front-week smile.
   //
   // Strategy:
-  //   1. Discovery fetch — tight ATM strike range to enumerate available expiries
-  //      with minimal data. One page covers 20+ expiries for any liquid underlying.
-  //   2. Per-expiry fetch — exact expiration_date param, strike ±20%, paginated.
-  //      Results are merged into a single OptionChain.
+  //   1. Discovery fetch — tight ATM strike range + 260-DTE cap to enumerate
+  //      the full set of available expiries in one pass with minimal bandwidth.
+  //   2. Target-DTE selection — for each target in [7,14,30,60,90,120,180,252]
+  //      pick the available expiry whose actual DTE is nearest; deduplicate so
+  //      the same expiry is only fetched once even if two targets map to it.
+  //   3. Per-expiry fetch — exact expiration_date= param, strike ±20%, paginated.
   //
-  // API probe confirmed: expiration_date= (exact date) is a valid filter param.
+  // API probe confirmed: expiration_date= (exact) is a valid filter param.
   async getSurfaceChain(underlying: string): Promise<OptionChain> {
     const spot = await this.getSpot(underlying);
 
-    // ── 1. Discovery: enumerate expiries ≥ 3 DTE ──────────────────────────
-    const minDteDate = new Date();
-    minDteDate.setDate(minDteDate.getDate() + 3);
-    const minExpiry = minDteDate.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    // ── 1. Discovery: enumerate expiries in [3 DTE, 260 DTE] ──────────────
+    const makeRelDate = (daysAhead: number) => {
+      const d = new Date();
+      d.setDate(d.getDate() + daysAhead);
+      return d.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    };
+    const minExpiry = makeRelDate(3);
+    const maxExpiry = makeRelDate(260); // cap covers the 252-DTE target with margin
 
-    // Tight ATM range (floor → ceil+1) → a few contracts per expiry → all
-    // expiries appear in one page with limit=100, wasting minimal bandwidth.
-    const discoveryParams = new URLSearchParams({
-      feed:                "indicative",
-      limit:               "100",
-      expiration_date_gte: minExpiry,
-      strike_price_gte:    String(Math.floor(spot)),
-      strike_price_lte:    String(Math.ceil(spot) + 1),
-    });
-    const discovery = await this.apiFetch<SnapshotsPage>(
-      `${DATA_BASE}/v1beta1/options/snapshots/${underlying}?${discoveryParams}`
-    );
-    const allExpiries = [
-      ...new Set(
-        Object.keys(discovery.snapshots)
-          .map(t => parseTicker(t, underlying)?.expiry)
-          .filter((e): e is string => !!e)
-      ),
-    ].sort();
+    // Tight ATM range (floor → ceil+1) gives 2-6 contracts per expiry.
+    // limit=500 covers ~80-120 expiries in one page — sufficient for any
+    // liquid underlying. Paginate once more as a safety net.
+    const allExpiriesSet = new Set<string>();
+    let discoveryToken: string | null = null;
+    let discoveryPages = 0;
+    do {
+      const dp = new URLSearchParams({
+        feed:                "indicative",
+        limit:               "500",
+        expiration_date_gte: minExpiry,
+        expiration_date_lte: maxExpiry,
+        strike_price_gte:    String(Math.floor(spot)),
+        strike_price_lte:    String(Math.ceil(spot) + 1),
+      });
+      if (discoveryToken) dp.set("page_token", discoveryToken);
+      const disc = await this.apiFetch<SnapshotsPage>(
+        `${DATA_BASE}/v1beta1/options/snapshots/${underlying}?${dp}`
+      );
+      for (const t of Object.keys(disc.snapshots)) {
+        const exp = parseTicker(t, underlying)?.expiry;
+        if (exp) allExpiriesSet.add(exp);
+      }
+      discoveryToken = disc.next_page_token;
+      discoveryPages++;
+    } while (discoveryToken && discoveryPages < 2);
 
-    // First 8 expiries — already ≥ 3 DTE by the filter
-    const targetExpiries = allExpiries.slice(0, 8);
+    const allExpiries = [...allExpiriesSet].sort();
+
+    // ── 2. Target-DTE selection ────────────────────────────────────────────
+    // Spread across the curve so the surface shows term structure, not just
+    // the front.  For each target, find the nearest available expiry by
+    // calendar days; deduplicate via Set (two targets can converge to one
+    // expiry when coverage is sparse at the far end).
+    const TARGET_DTES = [7, 14, 30, 60, 90, 120, 180, 252];
+    const todayMs = new Date(isoTodayET() + "T00:00:00Z").getTime();
+    const calDte = (exp: string) =>
+      (new Date(exp + "T00:00:00Z").getTime() - todayMs) / 86_400_000;
+
+    const targetSet = new Set<string>();
+    for (const tgt of TARGET_DTES) {
+      if (allExpiries.length === 0) break;
+      const nearest = allExpiries.reduce((best, exp) =>
+        Math.abs(calDte(exp) - tgt) < Math.abs(calDte(best) - tgt) ? exp : best
+      );
+      targetSet.add(nearest);
+    }
+    const targetExpiries = [...targetSet].sort();
 
     if (targetExpiries.length === 0) {
       return {
