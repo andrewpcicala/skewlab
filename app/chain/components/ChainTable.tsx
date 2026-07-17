@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, Fragment } from "react";
 import { motion } from "framer-motion";
 import { useMotionSafe, EASE_OUT } from "@/lib/motion";
 import type { OptionQuote } from "@/lib/data/types";
@@ -11,7 +11,7 @@ export interface ChainRow {
 }
 
 interface Props {
-  ticker:   string; // changes on new ticker load → resets row animation
+  ticker:   string;
   rows:     ChainRow[];
   spot:     number;
   selected: OptionQuote | null;
@@ -34,7 +34,7 @@ function fmtStrike(v: number): string {
   return v % 1 === 0 ? String(v) : v.toFixed(2);
 }
 
-// ── Cell ───────────────────────────────────────────────────────────────────
+// ── Cells ──────────────────────────────────────────────────────────────────
 
 function PriceCell({
   value,
@@ -71,10 +71,69 @@ function VolCell({ value, align }: { value: number | null | undefined; align: "r
   );
 }
 
+// ── Spot level-line ────────────────────────────────────────────────────────
+// Zero-height row inserted between the two rows that bracket spot.
+// An absolutely-positioned <div> draws the 1px rule across the full column
+// span — avoids border-collapse conflicts entirely. The label sits on the
+// rule at the right edge with a bg-colored backing so the line never strikes
+// through text.
+
+function SpotLevelLine({ colCount, spot }: { colCount: number; spot: number }) {
+  return (
+    <tr
+      aria-hidden
+      style={{ height: 0, borderTop: "none", borderBottom: "none" }}
+    >
+      <td
+        colSpan={colCount}
+        style={{
+          padding:    0,
+          height:     0,
+          lineHeight: "0",
+          fontSize:   "0",
+          border:     "none",
+          position:   "relative",
+        }}
+      >
+        {/* 1px accent rule spanning full table width */}
+        <div
+          style={{
+            position:        "absolute",
+            left:            "0",
+            right:           "0",
+            top:             "0",
+            height:          "1px",
+            transform:       "translateY(-50%)",
+            backgroundColor: "var(--color-accent)",
+            zIndex:          5,
+          }}
+        />
+        {/* Label at right edge, centered on the rule; bg backing prevents text/line collision */}
+        <span
+          className="label-caps text-accent"
+          style={{
+            position:        "absolute",
+            right:           "8px",
+            top:             "0",
+            transform:       "translateY(-50%)",
+            fontSize:        "10px",
+            lineHeight:      "1",
+            backgroundColor: "var(--color-bg)",
+            padding:         "0 4px",
+            whiteSpace:      "nowrap",
+            zIndex:          6,
+          }}
+        >
+          SPOT {spot.toFixed(2)}
+        </span>
+      </td>
+    </tr>
+  );
+}
+
 // ── Animated tbody rows ────────────────────────────────────────────────────
-// Rows animate once on first ticker load only, never on expiry switch.
-// The `key={ticker}` on this component forces a remount on ticker change,
-// resetting isFirstRender so the stagger runs exactly once per ticker.
+// Rows animate once on first ticker load only. key={ticker} on this component
+// forces a remount on ticker change, resetting isFirstRender.
 
 interface AnimBodyProps {
   rows:     ChainRow[];
@@ -84,32 +143,35 @@ interface AnimBodyProps {
 }
 
 function AnimatedBody({ rows, spot, selected, onSelect }: AnimBodyProps) {
-  const { reduced } = useMotionSafe();
-  const isFirstRender = useRef(true);
-  // Capture animate value before the effect sets isFirstRender to false
-  const shouldAnimate = isFirstRender.current && !reduced;
-  const atmRowRef = useRef<HTMLTableRowElement | null>(null);
+  const { reduced }      = useMotionSafe();
+  const isFirstRender    = useRef(true);
+  const shouldAnimate    = isFirstRender.current && !reduced;
+  const scrollTargetRef  = useRef<HTMLTableRowElement | null>(null);
 
   useEffect(() => {
     isFirstRender.current = false;
   }, []);
 
-  // Scroll ATM row to center on mount (once per ticker, instant — no animation)
+  // Scroll the nearest-to-spot row to center on mount (once per ticker)
   useEffect(() => {
-    if (atmRowRef.current) {
-      atmRowRef.current.scrollIntoView({ block: "center", behavior: "instant" });
+    if (scrollTargetRef.current) {
+      scrollTargetRef.current.scrollIntoView({ block: "center", behavior: "instant" });
     }
   }, []);
 
-  const atmStrike = rows.reduce(
+  // Nearest strike — used for centering the initial scroll position
+  const scrollStrike = rows.reduce(
     (best, r) => (Math.abs(r.strike - spot) < Math.abs(best - spot) ? r.strike : best),
     rows[0]?.strike ?? spot
   );
 
+  // First strike strictly ABOVE spot — level line is inserted before this row
+  // so the rule falls between the lower-bracket row and this row.
+  const upperBracket = rows.find(r => r.strike > spot)?.strike;
+
   return (
     <>
       {rows.map((row, i) => {
-        const isAtm = row.strike === atmStrike;
         const callOTM = row.strike > spot;
         const putOTM  = row.strike < spot;
         const callDim = callOTM ? "opacity-70" : "";
@@ -118,8 +180,6 @@ function AnimatedBody({ rows, spot, selected, onSelect }: AnimBodyProps) {
         const isCallSelected = selected !== null && selected.symbol === row.call?.symbol;
         const isPutSelected  = selected !== null && selected.symbol === row.put?.symbol;
 
-        // 2px accent border on outermost cell of the selected side; compensate padding
-        // so content position stays identical: border-l-2 + pl-[10px] = 12px (same as px-3)
         const callOuterCls = isCallSelected
           ? "border-l-2 border-accent pl-[10px] pr-3"
           : "px-3";
@@ -133,63 +193,63 @@ function AnimatedBody({ rows, spot, selected, onSelect }: AnimBodyProps) {
         const putPtr    = row.put  ? "cursor-pointer" : "";
 
         return (
-          <motion.tr
-            key={row.strike}
-            ref={isAtm ? atmRowRef : undefined}
-            initial={shouldAnimate ? { opacity: 0, y: 4 } : false}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{
-              duration: 0.25,
-              delay: shouldAnimate ? i * 0.02 : 0,
-              ease: EASE_OUT,
-            }}
-            style={isAtm ? { borderTop: "1px solid var(--color-accent)" } : undefined}
-            className="h-8 hover:bg-[#101014] transition-colors duration-[100ms]"
-          >
-            {/* ── CALLS ──────────────────────────────────────── */}
-            <td className={`${callOuterCls} ${callDim} ${callPtr}`} onClick={clickCall}>
-              <VolCell value={row.call?.volume} align="right" />
-            </td>
-            <td className={`px-3 ${callDim} ${callPtr}`} onClick={clickCall}>
-              <PriceCell value={row.call?.last} align="right" />
-            </td>
-            <td className={`px-3 ${callDim} ${callPtr}`} onClick={clickCall}>
-              <PriceCell value={row.call?.mid} align="right" />
-            </td>
-            <td className={`px-3 ${callDim} ${callPtr}`} onClick={clickCall}>
-              <PriceCell value={row.call?.ask} colorClass="text-neg" align="right" />
-            </td>
-            <td className={`px-3 ${callDim} ${callPtr}`} onClick={clickCall}>
-              <PriceCell value={row.call?.bid} colorClass="text-pos" align="right" />
-            </td>
+          <Fragment key={row.strike}>
+            {/* Level line: inserted immediately before the upper bracket row */}
+            {row.strike === upperBracket && upperBracket !== undefined && (
+              <SpotLevelLine colCount={11} spot={spot} />
+            )}
 
-            {/* ── STRIKE ─────────────────────────────────────── */}
-            <td className="px-4 text-center border-l border-r border-edge relative">
-              <span className="num text-sm text-[#E7E7EA]">{fmtStrike(row.strike)}</span>
-              {isAtm && (
-                <span className="label-caps text-accent absolute right-1 top-0 -translate-y-full text-[10px] leading-none">
-                  SPOT {fmtPrice(spot)}
-                </span>
-              )}
-            </td>
+            <motion.tr
+              ref={row.strike === scrollStrike ? scrollTargetRef : undefined}
+              initial={shouldAnimate ? { opacity: 0, y: 4 } : false}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{
+                duration: 0.25,
+                delay:    shouldAnimate ? i * 0.02 : 0,
+                ease:     EASE_OUT,
+              }}
+              className="h-8 hover:bg-[#101014] transition-colors duration-[100ms]"
+            >
+              {/* ── CALLS ──────────────────────────────────────── */}
+              <td className={`${callOuterCls} ${callDim} ${callPtr}`} onClick={clickCall}>
+                <VolCell value={row.call?.volume} align="right" />
+              </td>
+              <td className={`px-3 ${callDim} ${callPtr}`} onClick={clickCall}>
+                <PriceCell value={row.call?.last} align="right" />
+              </td>
+              <td className={`px-3 ${callDim} ${callPtr}`} onClick={clickCall}>
+                <PriceCell value={row.call?.mid} align="right" />
+              </td>
+              <td className={`px-3 ${callDim} ${callPtr}`} onClick={clickCall}>
+                <PriceCell value={row.call?.ask} colorClass="text-neg" align="right" />
+              </td>
+              <td className={`px-3 ${callDim} ${callPtr}`} onClick={clickCall}>
+                <PriceCell value={row.call?.bid} colorClass="text-pos" align="right" />
+              </td>
 
-            {/* ── PUTS ───────────────────────────────────────── */}
-            <td className={`px-3 ${putDim} ${putPtr}`} onClick={clickPut}>
-              <PriceCell value={row.put?.bid} colorClass="text-pos" align="left" />
-            </td>
-            <td className={`px-3 ${putDim} ${putPtr}`} onClick={clickPut}>
-              <PriceCell value={row.put?.ask} colorClass="text-neg" align="left" />
-            </td>
-            <td className={`px-3 ${putDim} ${putPtr}`} onClick={clickPut}>
-              <PriceCell value={row.put?.mid} align="left" />
-            </td>
-            <td className={`px-3 ${putDim} ${putPtr}`} onClick={clickPut}>
-              <PriceCell value={row.put?.last} align="left" />
-            </td>
-            <td className={`${putOuterCls} ${putDim} ${putPtr}`} onClick={clickPut}>
-              <VolCell value={row.put?.volume} align="left" />
-            </td>
-          </motion.tr>
+              {/* ── STRIKE (old floating label removed) ────────── */}
+              <td className="px-4 text-center border-l border-r border-edge">
+                <span className="num text-sm text-[#E7E7EA]">{fmtStrike(row.strike)}</span>
+              </td>
+
+              {/* ── PUTS ───────────────────────────────────────── */}
+              <td className={`px-3 ${putDim} ${putPtr}`} onClick={clickPut}>
+                <PriceCell value={row.put?.bid} colorClass="text-pos" align="left" />
+              </td>
+              <td className={`px-3 ${putDim} ${putPtr}`} onClick={clickPut}>
+                <PriceCell value={row.put?.ask} colorClass="text-neg" align="left" />
+              </td>
+              <td className={`px-3 ${putDim} ${putPtr}`} onClick={clickPut}>
+                <PriceCell value={row.put?.mid} align="left" />
+              </td>
+              <td className={`px-3 ${putDim} ${putPtr}`} onClick={clickPut}>
+                <PriceCell value={row.put?.last} align="left" />
+              </td>
+              <td className={`${putOuterCls} ${putDim} ${putPtr}`} onClick={clickPut}>
+                <VolCell value={row.put?.volume} align="left" />
+              </td>
+            </motion.tr>
+          </Fragment>
         );
       })}
     </>
