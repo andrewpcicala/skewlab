@@ -230,3 +230,124 @@ of old and new data — particularly harmful at wings where volume is sparse and
 the last trade could be hours old. The surface code requires a live mid
 precisely to avoid this. Contracts without a live two-sided market are excluded
 rather than approximated.
+
+---
+
+### Realized volatility — how and why
+
+Realized volatility (RV) is the volatility that actually occurred over some
+historical window, measured from prices. It is the empirical counterpart to
+implied volatility: IV is what the market expected; RV is what happened.
+
+**Log returns.** We compute daily log returns r_t = ln(P_t / P_{t-1}) rather
+than simple returns (P_t/P_{t-1} − 1). Log returns are time-additive:
+ln(P_3/P_1) = ln(P_3/P_2) + ln(P_2/P_1). This makes multi-day aggregation
+exact — sum the daily log returns and you get the log return over the full
+period. Simple returns are not additive and compound in a path-dependent way.
+
+**Window: 21 trading days.** The VIX measures implied vol for the next 30
+calendar days. 21 trading days ≈ 30 calendar days (4.2 weeks × 5 days), so
+using 21-day forward RV matches the VIX horizon and makes the IV−RV comparison
+consistent. Deviations from exactly 30 calendar days introduce some noise.
+
+**Annualization: × √252.** Variance scales linearly with time under IID
+returns; volatility (standard deviation) therefore scales with √time. There
+are 252 trading days per year by convention, so multiplying the daily stdev
+by √252 converts it to an annualized figure, the same units as VIX.
+
+**Mean-zero convention.** The standard sample variance estimator subtracts the
+sample mean before squaring. For daily log returns this is a mistake: the true
+daily drift μ ≈ 0.03/252 ≈ 0.012% is negligible relative to daily vol σ ≈ 1%.
+Estimating μ from a 21-day window is noisy (standard error ≈ σ/√21 ≈ 22% of
+σ), and subtracting a noisy mean estimate inflates the estimator's variance.
+The mean-zero estimator RV = √(Σr²/n × 252) has provably lower mean squared
+error for typical equity parameters. It is also the convention used by CBOE
+in the original VIX methodology white paper.
+
+---
+
+### The VIX-as-IV proxy — what it is and its limits
+
+VIX (CBOE Volatility Index) is the market's real-time estimate of 30-day
+expected volatility for the S&P 500 index. It is calculated from a strip of
+SPX option prices — specifically, it uses a model-free formula that integrates
+across all available strikes (not just ATM) to extract the market's consensus
+variance expectation for the next 30 calendar days. The result is then
+annualized and expressed as a percentage.
+
+**Why it's a defensible SPY proxy.** SPY tracks the S&P 500 with tracking
+error typically below 0.05%. VIX is defined on the same index, so the implied
+vols should be nearly identical. In practice traders use VIX as the IV proxy
+for SPY without qualification — this is standard industry usage.
+
+**Known limits:**
+
+- *Instrument mismatch.* VIX uses SPX options, which are European and
+  cash-settled. SPY options are American and share-settled. American options
+  have early exercise value (puts can be worth exercising early when rates are
+  high; calls when a large dividend is imminent). Near ex-dividend dates, SPY
+  IV can diverge from VIX by 1–3 vol points.
+
+- *Model-free vs. model-dependent.* VIX's strip-of-options formula makes no
+  distributional assumptions — it measures the risk-neutral variance directly.
+  The implied vols we solve from individual SPY options (via Black-Scholes) are
+  model-dependent. The two should agree on average but differ strike by strike.
+
+- *30-day vs. 21-day mismatch.* VIX measures vol for 30 calendar days; we
+  compare it to 21 trading-day forward RV. The two windows differ by a small
+  amount that introduces noise, particularly around three-day weekends and
+  holiday-dense months where the trading-day/calendar-day ratio is not 252/365.
+
+These are documented, accepted approximations. The VRP finding — that mean VRP
+is positive and large — is robust to all of them; they affect precision, not
+the sign or order of magnitude of the result.
+
+---
+
+### The volatility risk premium — definition and intuition
+
+The volatility risk premium (VRP) is the excess return earned by systematically
+selling options on an index:
+
+   VRP(t) = IV(t) − RV_forward(t)
+
+where IV(t) is the implied vol (VIX) at date t and RV_forward(t) is the
+realized vol over the next 21 trading days. When VRP > 0, option sellers
+collected more premium than the hedged moves cost them.
+
+**The insurance margin analogy.** An option seller is an insurance company.
+The premium collected is the policy price (IV); the claims paid are the actual
+losses covered (RV). A well-run insurer prices above expected claims to earn a
+margin. The volatility risk premium is that margin: option buyers structurally
+overpay for insurance relative to realized outcomes because they are paying not
+just for expected vol but for the right to be hedged against tail scenarios
+they are not equipped to absorb. The seller bears the risk of a catastrophic
+event that would wipe out many months of premium in one day — the premium is
+compensation for that optionality.
+
+**The empirical finding in this dataset (2024-07-16 → 2026-06-12, 480 obs):**
+
+- Mean VRP: +3.99 percentage points. Option sellers earned 4 vol points above
+  realized outcomes on average — a material edge over 480 trading-day obs.
+- 85.6% of days had positive VRP — sellers won most of the time.
+- Maximum VRP: +22.74 pts on 2024-08-05 ("Vol Monday"). VIX spiked to 38.6%
+  on the yen-carry-trade unwind but SPY's actual 21-day RV was only 15.8%.
+  The panic was priced at 2.4× the realized vol that followed.
+- Worst episode: −34.13 pts on 2025-03-25 (Trump tariff shock). VIX was 17.1%
+  — the market saw low vol — but SPY realized 51.3% over the next 21 days as
+  the initial tariff announcements hit. This is the classic tail risk that the
+  VRP compensates for: rare, large, and unforeseeable from current IV levels.
+
+**Why the premium persists.** If markets were complete and agents risk-neutral,
+VRP would be zero: rational sellers would compete away any excess premium.
+VRP persists because:
+1. Jump and gap risk cannot be replicated by continuous delta-hedging — sellers
+   face discrete losses at earnings, macro prints, and geopolitical shocks.
+2. Demand for protection is structurally higher than the supply of risk capital
+   willing to bear it — pension funds, endowments, and corporations are
+   structural put buyers; dedicated vol sellers are smaller in aggregate.
+3. Left-tail risk (crashes) is psychologically costly beyond its actuarial
+   value — investors pay a fear premium above the mathematically fair price.
+
+The risk is real, as March 2025 showed: a seller who was short vol through the
+tariff shock absorbed a ~34-point loss in a single 21-day window.

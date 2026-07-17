@@ -1,12 +1,13 @@
-// Polygon.io provider — retained for Phase 3 historical stock aggregates.
-// Options chain is now served by AlpacaProvider (lib/data/alpaca.ts).
-// Nothing imports this file yet; it will be wired in Phase 3 for
-// historical close data via /v2/aggs/ticker/{ticker}/range.
+// Polygon.io provider — Phase 3: historical stock aggregates (getDailyCloses).
+// Options chain is served by AlpacaProvider (lib/data/alpaca.ts).
 //
 // TIER NOTE: /v3/snapshot/options returns 403 on the free Polygon plan.
-// Options chain was attempted here but proved unavailable on this tier.
+// I:VIX (index aggregates) is NOT_AUTHORIZED on free tier — VIX sourced from
+// FRED VIXCLS instead (see lib/data/vix.ts).
+// Free tier data range: ~2 years back (verified: 501 trading days available).
 
 import type { MarketDataProvider, OptionChain, OptionQuote } from "./types";
+import { makeTtlCache } from "./cache";
 
 const BASE = "https://api.polygon.io";
 const BATCH_SIZE = 5;
@@ -28,6 +29,63 @@ interface PolyBar {
 interface PolyAggResponse {
   results?: PolyBar[];
   status: string;
+}
+
+// Shape returned by /v2/aggs/ticker/{sym}/range/1/day/{from}/{to}
+interface PolyRangeResponse {
+  results?:  PolyBar[];
+  status:    string;
+  next_url?: string;
+}
+
+// ── getDailyCloses ────────────────────────────────────────────────────────────
+
+export interface DailyClose {
+  date:  string;  // YYYY-MM-DD (UTC calendar date of bar)
+  close: number;
+}
+
+// 24-hour TTL — historical closes are immutable once the day is settled
+const closeCache = makeTtlCache<DailyClose[]>(24 * 60 * 60 * 1000);
+
+export async function getDailyCloses(
+  symbol: string,
+  from:   string,  // YYYY-MM-DD inclusive
+  to:     string,  // YYYY-MM-DD inclusive
+): Promise<DailyClose[]> {
+  const cacheKey = `${symbol}:${from}:${to}`;
+  const cached = closeCache.get(cacheKey);
+  if (cached) {
+    console.log(`[cache] HIT ${symbol} closes ${from}→${to}`);
+    return cached;
+  }
+
+  const apiKey = process.env.POLYGON_API_KEY;
+  if (!apiKey) throw new Error("POLYGON_API_KEY is not set");
+
+  const results: DailyClose[] = [];
+  // next_url from Polygon already contains all query params except apiKey
+  let url: string | null =
+    `${BASE}/v2/aggs/ticker/${symbol}/range/1/day/${from}/${to}` +
+    `?adjusted=true&sort=asc&limit=5000&apiKey=${apiKey}`;
+
+  while (url) {
+    const r = await fetch(url);
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({})) as { message?: string };
+      throw new Error(`Polygon ${r.status}: ${j.message ?? r.statusText}`);
+    }
+    const j = await r.json() as PolyRangeResponse;
+    for (const bar of j.results ?? []) {
+      // bar.t is Unix ms at midnight UTC for the session date
+      results.push({ date: new Date(bar.t).toISOString().slice(0, 10), close: bar.c });
+    }
+    url = j.next_url ? `${j.next_url}&apiKey=${apiKey}` : null;
+  }
+
+  closeCache.set(cacheKey, results);
+  console.log(`[polygon] ${symbol} closes: ${results.length} bars ${from}→${to}`);
+  return results;
 }
 
 function delay(ms: number): Promise<void> {

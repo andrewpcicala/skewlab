@@ -24,3 +24,25 @@ export function getCachedChain(underlying: string): OptionChain | null {
 export function setCachedChain(underlying: string, chain: OptionChain): void {
   chainCache.set(underlying, { chain, fetchedAt: Date.now() });
 }
+
+// ── Generic TTL cache ─────────────────────────────────────────────────────────
+
+export interface TtlCache<V> {
+  get(key: string): V | null;
+  set(key: string, value: V): void;
+}
+
+export function makeTtlCache<V>(ttlMs: number): TtlCache<V> {
+  const store = new Map<string, { value: V; at: number }>();
+  return {
+    get(key) {
+      const e = store.get(key);
+      if (!e) return null;
+      if (Date.now() - e.at > ttlMs) { store.delete(key); return null; }
+      return e.value;
+    },
+    set(key, value) {
+      store.set(key, { value, at: Date.now() });
+    },
+  };
+}
