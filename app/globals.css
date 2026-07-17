@@ -31,6 +31,22 @@
   color: var(--color-label);
 }
 
+/* scroll-padding-top reserves the sticky nav height so anchor links
+   and scrollIntoView land below the nav bar, not under it */
+:root {
+  scroll-padding-top: 72px;
+}
+
+/* Contents rail: desktop-only aside on /findings */
+@utility findings-rail {
+  display: none;
+}
+@media (min-width: 1100px) {
+  .findings-rail {
+    display: block;
+  }
+}
+
 body {
   background-color: var(--color-bg);
   color: #e7e7ea;
