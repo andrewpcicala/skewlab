@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { SPRING_PANEL, EASE_OUT, useMotionSafe } from "@/lib/motion";
+import PageLoader from "@/app/components/PageLoader";
 import TickerInput from "./TickerInput";
 import StatusLine from "./StatusLine";
 import ExpiryTabs from "./ExpiryTabs";
@@ -103,7 +104,7 @@ export default function ChainView() {
       </div>
 
       {/* Loading */}
-      {loading && <p className="label-caps">LOADING CHAIN…</p>}
+      {loading && <PageLoader label="LOADING CHAIN" />}
 
       {/* Error */}
       {!loading && error && <p className="text-label text-sm">{error}</p>}

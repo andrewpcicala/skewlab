@@ -2,51 +2,14 @@
 import dynamic from "next/dynamic";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import TickerInput from "@/app/chain/components/TickerInput";
+import PageLoader from "@/app/components/PageLoader";
 import type { SurfacePoint, SurfaceStats } from "@/lib/pricing/surface";
 
-// ── Loading state ─────────────────────────────────────────────────────────────
-// Three dots animate opacity in sequence (400ms per beat, 1.2s cycle).
-// Reduced-motion: dots are static via the .dot-blink CSS rule in globals.css.
-function SolvingPlaceholder() {
-  return (
-    <div
-      style={{
-        height:         "70vh",
-        display:        "flex",
-        alignItems:     "center",
-        justifyContent: "center",
-      }}
-    >
-      <span className="label-caps">
-        SOLVING SURFACE
-        <span
-          className="dot-blink"
-          style={{ animation: "dot-blink 1.2s ease-in-out infinite", animationDelay: "0s" }}
-        >
-          .
-        </span>
-        <span
-          className="dot-blink"
-          style={{ animation: "dot-blink 1.2s ease-in-out infinite", animationDelay: "0.4s" }}
-        >
-          .
-        </span>
-        <span
-          className="dot-blink"
-          style={{ animation: "dot-blink 1.2s ease-in-out infinite", animationDelay: "0.8s" }}
-        >
-          .
-        </span>
-      </span>
-    </div>
-  );
-}
-
-// SurfacePlot is browser-only (Plotly + WebGL); loading fallback occupies the
-// same space as the plot so the page doesn't reflow when the plot mounts.
+// SurfacePlot is browser-only (Plotly + WebGL); the PageLoader occupies the
+// same 70vh space so the page doesn't reflow when the plot mounts.
 const SurfacePlot = dynamic(() => import("./SurfacePlot"), {
   ssr:     false,
-  loading: SolvingPlaceholder,
+  loading: () => <PageLoader label="SOLVING SURFACE" />,
 });
 
 interface SurfaceData {
@@ -134,8 +97,9 @@ export default function SurfaceView() {
   return (
     <div>
       {/* ── Header ──────────────────────────────────────────────────────── */}
+      {/* flex-wrap so the status line drops below the ticker on narrow screens */}
       <div
-        className="flex items-end justify-between border-b border-edge"
+        className="flex flex-wrap items-end justify-between gap-y-3 border-b border-edge"
         style={{ paddingBottom: "24px", marginBottom: "24px" }}
       >
         <div className="flex items-baseline gap-6">
@@ -169,11 +133,10 @@ export default function SurfaceView() {
       )}
 
       {/* ── Plot ────────────────────────────────────────────────────────── */}
-      {/* SolvingPlaceholder fills 70vh while loading; SurfacePlot replaces it */}
       {!error && (
         <>
           {(loading && !data) ? (
-            <SolvingPlaceholder />
+            <PageLoader label="SOLVING SURFACE" />
           ) : data ? (
             <SurfacePlot
               points={data.points}
@@ -183,15 +146,17 @@ export default function SurfaceView() {
           ) : null}
 
           {/* ── Skew readout ───────────────────────────────────────────── */}
+          {/* flexWrap: wrap so the three stats flow to a second line on mobile */}
           {skew && (
             <div
               style={{
-                borderTop:   "1px solid var(--color-edge)",
-                marginTop:   "24px",
-                paddingTop:  "24px",
-                display:     "flex",
-                gap:         "2rem",
-                fontSize:    "13px",
+                borderTop:     "1px solid var(--color-edge)",
+                marginTop:     "24px",
+                paddingTop:    "24px",
+                display:       "flex",
+                flexWrap:      "wrap",
+                gap:           "0.75rem 2rem",
+                fontSize:      "13px",
                 letterSpacing: "0.08em",
                 textTransform: "uppercase",
               }}

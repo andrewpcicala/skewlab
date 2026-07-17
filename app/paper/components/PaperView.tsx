@@ -4,6 +4,7 @@ import { STRATEGIES } from "@/lib/paper/strategies";
 import type { Position } from "@/lib/paper/ledger";
 import BlotterTable, { positionPnl } from "./BlotterTable";
 import PositionPanel from "./PositionPanel";
+import PageLoader from "@/app/components/PageLoader";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -134,11 +135,7 @@ export default function PaperView() {
   // ── Loading / error ──────────────────────────────────────────────────────
 
   if (loading) {
-    return (
-      <div style={{ height: "60vh", display: "flex", alignItems: "center" }}>
-        <span className="label-caps">LOADING</span>
-      </div>
-    );
+    return <PageLoader label="LOADING BOOK" />;
   }
 
   if (error || !data) {

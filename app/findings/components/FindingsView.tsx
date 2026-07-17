@@ -1,6 +1,7 @@
 "use client";
 import dynamic from "next/dynamic";
 import { useState, useEffect } from "react";
+import PageLoader from "@/app/components/PageLoader";
 import type { VrpPoint, VrpStats } from "@/lib/study/vrp";
 
 // Section break: 48px above the rule, 32px below rule to heading (per spec)
@@ -19,18 +20,9 @@ const BODY: React.CSSProperties = {
   margin:     0,
 };
 
-// Chart loading placeholder preserves vertical space so the page doesn't reflow
-function ChartPlaceholder() {
-  return (
-    <div style={{ height: "calc(80vh + 60px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <span className="label-caps">LOADING</span>
-    </div>
-  );
-}
-
 const FindingsCharts = dynamic(() => import("./FindingsCharts"), {
   ssr:     false,
-  loading: ChartPlaceholder,
+  loading: () => <PageLoader label="LOADING STUDY" />,
 });
 
 interface FindingsData {
@@ -118,11 +110,7 @@ export default function FindingsView() {
   }, []);
 
   if (loading) {
-    return (
-      <div style={{ height: "60vh", display: "flex", alignItems: "center" }}>
-        <span className="label-caps">LOADING</span>
-      </div>
-    );
+    return <PageLoader label="LOADING STUDY" />;
   }
 
   // Both success and error states render the full page skeleton.
