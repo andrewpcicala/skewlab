@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import NavLinks from "./components/NavLinks";
+import SiteFooter from "./components/SiteFooter";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -54,6 +55,7 @@ export default function RootLayout({
         <main className="max-w-[1200px] mx-auto px-6 py-10 overflow-x-clip">
           {children}
         </main>
+        <SiteFooter />
       </body>
     </html>
   );

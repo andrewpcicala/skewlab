@@ -158,8 +158,13 @@ function ContentsRail({ activeId }: { activeId: string | null }) {
   );
 }
 
+const LINKEDIN  = "https://www.linkedin.com/in/andrewcicala/";
+const GITHUB    = "https://github.com/andrewpcicala/skewlab";
+const CONTACT   = "mailto:andrewpcicala@gmail.com";
+const PUBLISHED = "JULY 2026";
+
 // ── Main view ─────────────────────────────────────────────────────────────────
-export default function FindingsView() {
+export default function FindingsView({ buildDate }: { buildDate: string }) {
   const [data,     setData]     = useState<FindingsData | null>(null);
   const [loading,  setLoading]  = useState(true);
   const [errSrc,   setErrSrc]   = useState<string | null>(null);
@@ -249,6 +254,35 @@ export default function FindingsView() {
           >
             The Volatility Risk Premium in SPY
           </h1>
+
+          {/* Byline */}
+          <div style={{ marginBottom: "10px" }}>
+            <div className="label-caps" style={{ color: "var(--color-label)", marginBottom: "4px" }}>
+              ANDREW CICALA · INDUSTRIAL ENGINEERING, RUTGERS UNIVERSITY
+            </div>
+            <div
+              style={{
+                display:        "flex",
+                justifyContent: "space-between",
+                alignItems:     "baseline",
+                flexWrap:       "wrap",
+                gap:            "2px 0",
+              }}
+            >
+              <span
+                className="num"
+                style={{ fontSize: "11px", color: "var(--color-label)", letterSpacing: "0.04em" }}
+              >
+                PUBLISHED {PUBLISHED} · UPDATED {buildDate}
+              </span>
+              <span className="label-caps">
+                <a href={LINKEDIN} target="_blank" rel="noreferrer" className="link-accent">LINKEDIN</a>
+                {" · "}
+                <a href={CONTACT} className="link-accent">CONTACT</a>
+              </span>
+            </div>
+          </div>
+
           <div className="label-caps" style={{ display: "flex", flexWrap: "wrap", gap: "0 1rem", lineHeight: "1.8" }}>
             <span>{meta?.dataRange.from ?? "—"} → {meta?.dataRange.to ?? "—"}</span>
             <span style={{ opacity: 0.35 }}>·</span>
@@ -407,6 +441,31 @@ export default function FindingsView() {
               </P>
             </MethodSection>
 
+          </div>
+        </div>
+
+        {/* Colophon */}
+        <div style={{ borderTop: "1px solid var(--color-edge)", marginTop: "48px", paddingTop: "32px" }}>
+          <span
+            className="label-caps"
+            style={{ color: "#E7E7EA", display: "block", marginBottom: "12px" }}
+          >
+            ABOUT THIS PROJECT
+          </span>
+          <P>
+            SkewLab is an independent research project by Andrew Cicala (Industrial
+            Engineering, Rutgers University). All pricing and volatility mathematics —
+            Black-Scholes, the Greeks, the Newton-Raphson implied-vol solver, realized
+            volatility — are hand-written in TypeScript with no pricing libraries.
+            Ongoing work: a live rule-based paper-trading experiment harvesting the
+            premium measured above.
+          </P>
+          <div style={{ marginTop: "12px" }} className="label-caps">
+            <a href={LINKEDIN} target="_blank" rel="noreferrer" className="link-accent">LINKEDIN</a>
+            {" · "}
+            <a href={GITHUB} target="_blank" rel="noreferrer" className="link-accent">GITHUB</a>
+            {" · "}
+            <a href={CONTACT} className="link-accent">CONTACT</a>
           </div>
         </div>
 

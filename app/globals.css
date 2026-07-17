@@ -47,6 +47,15 @@
   }
 }
 
+/* Accent link: used for attribution links in byline, colophon, footer */
+.link-accent {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+.link-accent:hover {
+  text-decoration: underline;
+}
+
 body {
   background-color: var(--color-bg);
   color: #e7e7ea;
