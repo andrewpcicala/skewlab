@@ -225,6 +225,24 @@ export default function SurfaceView() {
               </span>
             </div>
           )}
+
+          {/* ── Abstract ───────────────────────────────────────────────── */}
+          <p
+            style={{
+              fontSize:   "15px",
+              lineHeight: "1.6",
+              color:      "var(--color-label)",
+              maxWidth:   "68ch",
+              margin:     "24px 0 0",
+            }}
+          >
+            SkewLab is an options analytics workbench with hand-written pricing
+            — no vendor Greeks. The surface fits implied volatility across
+            strikes and expiries from live mid quotes. Findings studies the
+            volatility risk premium in SPY: what the market charges for
+            protection versus what actually occurs. Paper tracks simulated
+            trades against live quotes in an append-only ledger.
+          </p>
         </>
       )}
     </div>
