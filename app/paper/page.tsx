@@ -1,7 +1,5 @@
+import PaperView from "./components/PaperView";
+
 export default function PaperPage() {
-  return (
-    <div>
-      <p className="label-caps">PAPER BOOK</p>
-    </div>
-  );
+  return <PaperView />;
 }
