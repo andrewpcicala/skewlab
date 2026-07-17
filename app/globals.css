@@ -47,6 +47,16 @@
   }
 }
 
+/* ⌘K hint in nav: hide on mobile */
+.cmd-k-hint {
+  display: none;
+}
+@media (min-width: 768px) {
+  .cmd-k-hint {
+    display: inline;
+  }
+}
+
 /* Accent link: used for attribution links in byline, colophon, footer */
 .link-accent {
   color: var(--color-accent);

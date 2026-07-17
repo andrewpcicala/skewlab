@@ -60,11 +60,28 @@ function buildGrid(pts: SurfacePoint[]) {
   return { strikes, dtes, z };
 }
 
+// ── Expiry lookup by DTE ──────────────────────────────────────────────────────
+// Used by the click handler to map Plotly's y-axis (dte) back to an expiry string.
+function findExpiryByDte(points: SurfacePoint[], clickedDte: number): string | null {
+  const expDte = new Map<string, number>();
+  for (const p of points) {
+    if (!expDte.has(p.expiry)) expDte.set(p.expiry, Math.round(p.dte));
+  }
+  let best: string | null = null;
+  let bestDist = Infinity;
+  for (const [exp, dte] of expDte) {
+    const d = Math.abs(dte - clickedDte);
+    if (d < bestDist) { bestDist = d; best = exp; }
+  }
+  return best;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 interface Props {
-  points: SurfacePoint[];
-  ticker: string;
-  spot:   number;
+  points:        SurfacePoint[];
+  ticker:        string;
+  spot:          number;
+  onPointClick?: (expiry: string, strike: number) => void;
 }
 
 // "entering" is intentionally absent: the surface renders at full opacity the
@@ -72,10 +89,17 @@ interface Props {
 // (camera → home over 600ms) and the idle orbit.
 type Phase = "easing" | "orbiting" | "paused";
 
-export default function SurfacePlot({ points, ticker, spot }: Props) {
+export default function SurfacePlot({ points, ticker, spot, onPointClick }: Props) {
   const { reduced } = useMotionSafe();
-  const divRef   = useRef<HTMLDivElement>(null);
-  const seqRef   = useRef(0);
+  const divRef      = useRef<HTMLDivElement>(null);
+  const seqRef      = useRef(0);
+  // Stable ref so the Plotly click handler always sees the latest callback
+  // without being listed in the rebuild effect's dependency array.
+  const onClickRef  = useRef(onPointClick);
+  useEffect(() => { onClickRef.current = onPointClick; }, [onPointClick]);
+  const pointsRef   = useRef(points);
+  useEffect(() => { pointsRef.current = points; }, [points]);
+
   const stateRef = useRef({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     P:     null as any,
@@ -299,14 +323,30 @@ export default function SurfacePlot({ points, ticker, spot }: Props) {
       div.addEventListener("pointerdown", stop);
       div.addEventListener("wheel",       stop, { passive: true });
       div.addEventListener("touchstart",  stop, { passive: true });
+
+      // Click handler: map clicked (strike, dte) to (expiry, strike) for cross-link
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const clickHandler = (eventData: any) => {
+        const pt = eventData?.points?.[0];
+        if (!pt || !onClickRef.current) return;
+        const expiry = findExpiryByDte(pointsRef.current, Math.round(pt.y));
+        if (expiry) onClickRef.current(expiry, pt.x);
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (div as any).off?.("plotly_click");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (div as any).on?.("plotly_click", clickHandler);
+
       cam.stops = [
         () => div.removeEventListener("pointerdown", stop),
         () => div.removeEventListener("wheel",       stop),
         () => div.removeEventListener("touchstart",  stop),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        () => (div as any).off?.("plotly_click"),
       ];
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [points, ticker, reduced, spot]);
 
-  return <div ref={divRef} style={{ width: "100%", height: "70vh" }} />;
+  return <div ref={divRef} style={{ width: "100%", height: "70vh", cursor: "pointer" }} />;
 }

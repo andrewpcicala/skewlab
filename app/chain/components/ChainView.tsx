@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { SPRING_PANEL, EASE_OUT, useMotionSafe } from "@/lib/motion";
 import PageLoader from "@/app/components/PageLoader";
@@ -10,15 +11,31 @@ import ChainTable, { type ChainRow } from "./ChainTable";
 import BreakdownPanel from "./BreakdownPanel";
 import type { OptionChain, OptionQuote } from "@/lib/data/types";
 
-export default function ChainView() {
+// Cache TTL matches the server-side cache (15 min). After this, show REFRESH.
+const STALE_MS = 15 * 60 * 1000;
+
+interface Props {
+  initialTicker?:  string;
+  initialExpiry?:  string;
+  initialStrike?:  number;
+}
+
+export default function ChainView({
+  initialTicker  = "SPY",
+  initialExpiry,
+  initialStrike,
+}: Props) {
   const { reduced } = useMotionSafe();
-  const [symbol, setSymbol] = useState("SPY");
-  const [chain, setChain] = useState<OptionChain | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const router      = useRouter();
+
+  const [symbol,        setSymbol]        = useState(initialTicker);
+  const [chain,         setChain]         = useState<OptionChain | null>(null);
+  const [loading,       setLoading]       = useState(true);
+  const [error,         setError]         = useState<string | null>(null);
   const [selectedExpiry, setSelectedExpiry] = useState<string>("");
-  const [showAll, setShowAll] = useState(false);
+  const [showAll,       setShowAll]       = useState(false);
   const [selectedQuote, setSelectedQuote] = useState<OptionQuote | null>(null);
+  const [fetchedAt,     setFetchedAt]     = useState<number | null>(null);
 
   const fetchChain = useCallback(async (sym: string) => {
     setLoading(true);
@@ -26,7 +43,7 @@ export default function ChainView() {
     setShowAll(false);
     setSelectedQuote(null);
     try {
-      const r = await fetch(`/api/chain?symbol=${encodeURIComponent(sym)}`);
+      const r    = await fetch(`/api/chain?symbol=${encodeURIComponent(sym)}`);
       const data = await r.json();
       if (!r.ok) {
         setError((data as { error?: string }).error ?? `HTTP ${r.status}`);
@@ -35,7 +52,8 @@ export default function ChainView() {
       }
       const c = data as OptionChain;
       setChain(c);
-      setSelectedExpiry((prev) =>
+      setFetchedAt(Date.now());
+      setSelectedExpiry(prev =>
         c.expiries.includes(prev) ? prev : (c.expiries[0] ?? "")
       );
     } catch (e) {
@@ -46,30 +64,75 @@ export default function ChainView() {
     }
   }, []);
 
-  useEffect(() => {
-    fetchChain(symbol);
-  }, [symbol, fetchChain]);
+  useEffect(() => { fetchChain(symbol); }, [symbol, fetchChain]);
 
-  const handleSubmit = useCallback(
-    (sym: string) => { if (sym !== symbol) setSymbol(sym); },
-    [symbol]
-  );
+  const handleSubmit = useCallback((sym: string) => {
+    if (sym !== symbol) {
+      setSymbol(sym);
+      router.replace(`/chain?s=${sym}`, { scroll: false });
+    }
+  }, [symbol, router]);
 
-  // Clear selection when expiry changes (selected contract is now off-screen)
   const handleExpirySelect = useCallback((exp: string) => {
     setSelectedExpiry(exp);
     setSelectedQuote(null);
   }, []);
 
+  // ←/→ keyboard: switch expiry when no input is focused
+  useEffect(() => {
+    if (!chain) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      const tag = (document.activeElement as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      e.preventDefault();
+      const idx = chain.expiries.indexOf(selectedExpiry);
+      if (e.key === "ArrowLeft"  && idx > 0)
+        handleExpirySelect(chain.expiries[idx - 1]);
+      if (e.key === "ArrowRight" && idx < chain.expiries.length - 1)
+        handleExpirySelect(chain.expiries[idx + 1]);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [chain, selectedExpiry, handleExpirySelect]);
+
+  // Auto-select expiry + open breakdown panel from URL params (surface → chain link)
+  useEffect(() => {
+    if (!chain || !initialExpiry) return;
+    if (!chain.expiries.includes(initialExpiry)) return;
+    setSelectedExpiry(initialExpiry);
+    if (initialStrike !== undefined) {
+      // Prefer the put that best matches the clicked contract
+      const quote =
+        chain.quotes.find(q =>
+          q.expiry === initialExpiry &&
+          q.strike === initialStrike &&
+          q.type   === "put"
+        ) ??
+        chain.quotes.find(q =>
+          q.expiry === initialExpiry &&
+          q.strike === initialStrike
+        );
+      if (quote) setSelectedQuote(quote);
+    }
+  // Run once when chain first loads; initialExpiry/initialStrike are stable props.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chain]);
+
+  // Staleness: data older than STALE_MS triggers the REFRESH affordance
+  const isStale = fetchedAt !== null && Date.now() - fetchedAt > STALE_MS;
+
+  const handleRefresh = useCallback(() => { fetchChain(symbol); }, [fetchChain, symbol]);
+
   // Build T-table rows for the selected expiry
   const allRows: ChainRow[] = (() => {
     if (!chain || !selectedExpiry) return [];
-    const quotes = chain.quotes.filter((q) => q.expiry === selectedExpiry);
-    const strikes = [...new Set(quotes.map((q) => q.strike))].sort((a, b) => a - b);
-    return strikes.map((strike) => ({
+    const quotes  = chain.quotes.filter(q => q.expiry === selectedExpiry);
+    const strikes = [...new Set(quotes.map(q => q.strike))].sort((a, b) => a - b);
+    return strikes.map(strike => ({
       strike,
-      call: quotes.find((q) => q.strike === strike && q.type === "call"),
-      put:  quotes.find((q) => q.strike === strike && q.type === "put"),
+      call: quotes.find(q => q.strike === strike && q.type === "call"),
+      put:  quotes.find(q => q.strike === strike && q.type === "put"),
     }));
   })();
 
@@ -77,7 +140,7 @@ export default function ChainView() {
   const rows = showAll || !chain
     ? allRows
     : allRows.filter(
-        (r) => r.strike >= chain.spot * 0.85 && r.strike <= chain.spot * 1.15
+        r => r.strike >= chain.spot * 0.85 && r.strike <= chain.spot * 1.15
       );
 
   return (
@@ -99,6 +162,8 @@ export default function ChainView() {
             quoteBasis={chain.quoteBasis}
             asOf={chain.asOf}
             truncated={chain.truncated}
+            isStale={isStale}
+            onRefresh={handleRefresh}
           />
         )}
       </div>
@@ -149,11 +214,11 @@ export default function ChainView() {
                   key="panel"
                   initial={{ width: 0 }}
                   animate={{
-                    width: 360,
+                    width:      360,
                     transition: reduced ? { duration: 0 } : SPRING_PANEL,
                   }}
                   exit={{
-                    width: 0,
+                    width:      0,
                     transition: reduced
                       ? { duration: 0 }
                       : { duration: 0.2, ease: EASE_OUT },

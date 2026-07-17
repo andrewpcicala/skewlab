@@ -3,6 +3,8 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import NavLinks from "./components/NavLinks";
 import SiteFooter from "./components/SiteFooter";
+import CommandPalette from "./components/CommandPalette";
+import Prewarm from "./components/Prewarm";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -56,6 +58,8 @@ export default function RootLayout({
           {children}
         </main>
         <SiteFooter />
+        <CommandPalette />
+        <Prewarm />
       </body>
     </html>
   );

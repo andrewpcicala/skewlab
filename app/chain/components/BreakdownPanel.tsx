@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import Link from "next/link";
 import { motion, AnimatePresence, useAnimate, type Variants } from "framer-motion";
 import { panelVariants, EASE_OUT, NUMBER_ROLL_DURATION, useMotionSafe, priceFlash } from "@/lib/motion";
 import { bsPrice, timeToExpiryYears } from "@/lib/pricing/blackScholes";
@@ -185,15 +186,19 @@ export default function BreakdownPanel({ quote, spot, onClose }: Props) {
 
           {/* 1 · Header + MODEL INPUTS ──────────────────────────────────── */}
           <motion.div variants={section} className="flex flex-col gap-4">
-            {/* Header */}
-            <div>
+            {/* Header — links back to surface at this ticker */}
+            <Link
+              href={`/?s=${quote.underlying}`}
+              style={{ textDecoration: "none", display: "block" }}
+            >
               <span className="label-caps">{quote.underlying}{" "}</span>
               <span className="num text-base text-[#E7E7EA] font-medium">
                 {fmtStrike(quote.strike)}
               </span>
               <span className="label-caps text-base text-[#E7E7EA]"> {typeLabel}</span>
               <span className="label-caps"> · {fmtExpiry(quote.expiry)}</span>
-            </div>
+              <span className="label-caps text-accent"> ↗</span>
+            </Link>
 
             {/* MODEL INPUTS */}
             <div>

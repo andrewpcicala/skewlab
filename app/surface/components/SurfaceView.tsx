@@ -1,6 +1,7 @@
 "use client";
 import dynamic from "next/dynamic";
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import TickerInput from "@/app/chain/components/TickerInput";
 import PageLoader from "@/app/components/PageLoader";
 import type { SurfacePoint, SurfaceStats } from "@/lib/pricing/surface";
@@ -50,8 +51,9 @@ function computeSkew(points: SurfacePoint[], spot: number) {
 }
 
 // ── Main view ─────────────────────────────────────────────────────────────────
-export default function SurfaceView() {
-  const [ticker,  setTicker]  = useState("SPY");
+export default function SurfaceView({ initialTicker = "SPY" }: { initialTicker?: string }) {
+  const router = useRouter();
+  const [ticker,  setTicker]  = useState(initialTicker);
   const [data,    setData]    = useState<SurfaceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
@@ -78,10 +80,17 @@ export default function SurfaceView() {
 
   useEffect(() => { fetchSurface(ticker); }, [ticker, fetchSurface]);
 
-  const handleSubmit = useCallback(
-    (sym: string) => { if (sym !== ticker) setTicker(sym); },
-    [ticker]
-  );
+  const handleSubmit = useCallback((sym: string) => {
+    if (sym !== ticker) {
+      setTicker(sym);
+      router.replace(`/?s=${sym}`, { scroll: false });
+    }
+  }, [ticker, router]);
+
+  // Surface → chain cross-link: navigate to /chain with expiry + strike pre-selected
+  const handlePointClick = useCallback((expiry: string, strike: number) => {
+    router.push(`/chain?s=${ticker}&expiry=${expiry}&strike=${strike}`);
+  }, [ticker, router]);
 
   const skew = useMemo(
     () => (data ? computeSkew(data.points, data.spot) : null),
@@ -142,6 +151,7 @@ export default function SurfaceView() {
               points={data.points}
               ticker={ticker}
               spot={data.spot}
+              onPointClick={handlePointClick}
             />
           ) : null}
 
