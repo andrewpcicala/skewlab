@@ -87,24 +87,34 @@ function M({ children }: { children: React.ReactNode }) {
 export default function FindingsView() {
   const [data,    setData]    = useState<FindingsData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState<string | null>(null);
+  const [errSrc,  setErrSrc]  = useState<string | null>(null);
 
   useEffect(() => {
+    const ctrl = new AbortController();
+    const tid  = setTimeout(() => ctrl.abort(), 15_000);
+
     (async () => {
       try {
-        const r    = await fetch("/api/findings");
+        const r    = await fetch("/api/findings", { signal: ctrl.signal });
         const json = await r.json();
         if (!r.ok) {
-          setError((json as { error?: string }).error ?? `HTTP ${r.status}`);
+          setErrSrc((json as { source?: string }).source ?? "EXTERNAL SOURCE");
           return;
         }
         setData(json as FindingsData);
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Network error");
+        if (e instanceof DOMException && e.name === "AbortError") {
+          setErrSrc("SERVER");
+        } else {
+          setErrSrc("EXTERNAL SOURCE");
+        }
       } finally {
+        clearTimeout(tid);
         setLoading(false);
       }
     })();
+
+    return () => { ctrl.abort(); clearTimeout(tid); };
   }, []);
 
   if (loading) {
@@ -115,15 +125,18 @@ export default function FindingsView() {
     );
   }
 
-  if (error || !data) {
-    return (
-      <div style={{ height: "60vh", display: "flex", alignItems: "center" }}>
-        <span className="label-caps">{error ?? "No data"}</span>
-      </div>
-    );
-  }
+  // Both success and error states render the full page skeleton.
+  // Data-dependent values fall back to "—" when data is null.
+  const isError = data === null;
+  const meta    = data?.meta;
+  const stats   = data?.stats;
 
-  const { series, stats, meta } = data;
+  const statItems = [
+    { label: "MEAN VRP",  val: stats  ? signed(stats.mean) + " pts"               : "—", color: "#E7E7EA" as const,          sub: null },
+    { label: "POSITIVE",  val: stats  ? stats.pctPositive.toFixed(1) + "% of days": "—", color: "#E7E7EA" as const,          sub: null },
+    { label: "MAX",       val: stats  ? signed(stats.max.vrp) + " pts"             : "—", color: "#E7E7EA" as const,          sub: stats?.max.date ?? null },
+    { label: "WORST",     val: stats  ? signed(stats.min.vrp) + " pts"             : "—", color: "var(--color-neg)" as const, sub: stats?.min.date ?? null },
+  ];
 
   return (
     <div>
@@ -136,9 +149,9 @@ export default function FindingsView() {
           The Volatility Risk Premium in SPY
         </h1>
         <div className="label-caps" style={{ display: "flex", flexWrap: "wrap", gap: "0 1rem", lineHeight: "1.8" }}>
-          <span>{meta.dataRange.from} → {meta.dataRange.to}</span>
+          <span>{meta?.dataRange.from ?? "—"} → {meta?.dataRange.to ?? "—"}</span>
           <span style={{ opacity: 0.35 }}>·</span>
-          <span>{meta.seriesLength} observations</span>
+          <span>{meta?.seriesLength ?? "—"} observations</span>
           <span style={{ opacity: 0.35 }}>·</span>
           <span>SPY: Polygon · VIX: FRED · RV: 21-day realized, hand-computed</span>
           <span style={{ opacity: 0.35 }}>·</span>
@@ -152,7 +165,7 @@ export default function FindingsView() {
         </div>
       </div>
 
-      {/* ── Headline stats row — 32px clearance to charts ───────────────── */}
+      {/* ── Headline stats row ───────────────────────────────────────────── */}
       <div
         style={{
           display:       "flex",
@@ -163,12 +176,7 @@ export default function FindingsView() {
           marginBottom:  "32px",
         }}
       >
-        {[
-          { label: "MEAN VRP",  val: signed(stats.mean) + " pts",               color: "#E7E7EA",          sub: null },
-          { label: "POSITIVE",  val: stats.pctPositive.toFixed(1) + "% of days", color: "#E7E7EA",          sub: null },
-          { label: "MAX",       val: signed(stats.max.vrp) + " pts",             color: "#E7E7EA",          sub: stats.max.date },
-          { label: "WORST",     val: signed(stats.min.vrp) + " pts",             color: "var(--color-neg)", sub: stats.min.date },
-        ].map(({ label, val, color, sub }) => (
+        {statItems.map(({ label, val, color, sub }) => (
           <span
             key={label}
             style={{ color: "var(--color-label)", fontSize: "13px", textTransform: "uppercase", letterSpacing: "0.08em" }}
@@ -182,8 +190,16 @@ export default function FindingsView() {
         ))}
       </div>
 
-      {/* ── Charts ───────────────────────────────────────────────────────── */}
-      <FindingsCharts series={series} max={stats.max} min={stats.min} />
+      {/* ── Error banner OR Charts ────────────────────────────────────────── */}
+      {isError ? (
+        <div style={{ marginBottom: "32px" }}>
+          <span className="label-caps" style={{ color: "var(--color-label)" }}>
+            STUDY DATA TEMPORARILY UNAVAILABLE — {errSrc} DID NOT RESPOND
+          </span>
+        </div>
+      ) : (
+        <FindingsCharts series={data.series} max={data.stats.max} min={data.stats.min} />
+      )}
 
       {/* ── Analysis: what the premium pays ─────────────────────────────── */}
       <div style={DIVIDER}>
@@ -248,11 +264,12 @@ export default function FindingsView() {
 
           <MethodBlock heading="Data caveats">
             Polygon free tier limits SPY history to approximately two years (sample:{" "}
-            {meta.dataRange.from} → {meta.dataRange.to}, {meta.seriesLength} VRP
-            observations). The sample excludes a 2020-class crisis and the 2022
-            rate-shock bear market; the worst episode here (March 2025 tariff shock,
-            VRP −34 pts) is severe but likely not the tail bound over a longer sample.
-            Realized vol estimates from a 21-day window carry standard error{" "}
+            {meta?.dataRange.from ?? "—"} → {meta?.dataRange.to ?? "—"},{" "}
+            {meta?.seriesLength ?? "—"} VRP observations). The sample excludes a
+            2020-class crisis and the 2022 rate-shock bear market; the worst episode
+            here (March 2025 tariff shock, VRP −34 pts) is severe but likely not the
+            tail bound over a longer sample. Realized vol estimates from a 21-day window
+            carry standard error{" "}
             <M>≈ σ/√(2n) ≈ 15%</M> of true vol, so individual VRP readings are noisy;
             the mean and distributional statistics are stable across the sample.
           </MethodBlock>

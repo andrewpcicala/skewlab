@@ -22,7 +22,7 @@ export interface VixClose {
 // 24-hour TTL — historical VIX closes are immutable; recent data changes at most once/day
 const vixCache = makeTtlCache<VixClose[]>(24 * 60 * 60 * 1000);
 
-export async function getVixCloses(from: string, to: string): Promise<VixClose[]> {
+export async function getVixCloses(from: string, to: string, signal?: AbortSignal): Promise<VixClose[]> {
   const cacheKey = `${from}:${to}`;
   const cached = vixCache.get(cacheKey);
   if (cached) {
@@ -31,7 +31,7 @@ export async function getVixCloses(from: string, to: string): Promise<VixClose[]
   }
 
   const url = `${FRED_URL}?id=VIXCLS&cosd=${from}&coed=${to}`;
-  const r = await fetch(url);
+  const r = await fetch(url, signal ? { signal } : undefined);
   if (!r.ok) throw new Error(`FRED ${r.status}: ${r.statusText}`);
 
   const text = await r.text();

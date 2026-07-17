@@ -52,6 +52,7 @@ export async function getDailyCloses(
   symbol: string,
   from:   string,  // YYYY-MM-DD inclusive
   to:     string,  // YYYY-MM-DD inclusive
+  signal?: AbortSignal,
 ): Promise<DailyClose[]> {
   const cacheKey = `${symbol}:${from}:${to}`;
   const cached = closeCache.get(cacheKey);
@@ -70,7 +71,7 @@ export async function getDailyCloses(
     `?adjusted=true&sort=asc&limit=5000&apiKey=${apiKey}`;
 
   while (url) {
-    const r = await fetch(url);
+    const r = await fetch(url, signal ? { signal } : undefined);
     if (!r.ok) {
       const j = await r.json().catch(() => ({})) as { message?: string };
       throw new Error(`Polygon ${r.status}: ${j.message ?? r.statusText}`);
