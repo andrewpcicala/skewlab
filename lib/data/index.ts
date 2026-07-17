@@ -30,3 +30,13 @@ export async function getSurfaceChain(underlying: string): Promise<OptionChain> 
   setCachedChain(key, chain);
   return chain;
 }
+
+// Paper chain — 21-45 DTE window only; separate cache key.
+export async function getPaperChain(underlying: string): Promise<OptionChain> {
+  const key = `paper:${underlying}`;
+  const cached = getCachedChain(key);
+  if (cached) return cached;
+  const chain = await provider.getPaperChain(underlying);
+  setCachedChain(key, chain);
+  return chain;
+}

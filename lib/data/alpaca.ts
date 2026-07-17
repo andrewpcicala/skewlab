@@ -269,6 +269,77 @@ export class AlpacaProvider implements MarketDataProvider {
     };
   }
 
+  // ── Paper chain ───────────────────────────────────────────────────────────
+  // Fetches only the 21-45 DTE window needed for paper strategy entry selection.
+  // getChain() hits the page limit at near-term weeklies; this scopes to the
+  // theta-acceleration window directly so findEntryContract always gets candidates.
+  async getPaperChain(underlying: string): Promise<OptionChain> {
+    const spot = await this.getSpot(underlying);
+
+    const relDate = (daysAhead: number) => {
+      const d = new Date();
+      d.setDate(d.getDate() + daysAhead);
+      return d.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    };
+
+    // Strike range: spot ±25%, rounded to nearest $5
+    const lo = Math.ceil((spot * 0.75) / 5) * 5;
+    const hi = Math.floor((spot * 1.25) / 5) * 5;
+
+    const quotes: OptionQuote[] = [];
+    let pageToken: string | null = null;
+    let pages = 0;
+    let truncated = false;
+
+    do {
+      const params = new URLSearchParams({
+        feed:                "indicative",
+        limit:               "500",
+        strike_price_gte:    String(lo),
+        strike_price_lte:    String(hi),
+        expiration_date_gte: relDate(21),
+        expiration_date_lte: relDate(45),
+      });
+      if (pageToken) params.set("page_token", pageToken);
+
+      const page = await this.apiFetch<SnapshotsPage>(
+        `${DATA_BASE}/v1beta1/options/snapshots/${underlying}?${params}`
+      );
+
+      for (const [ticker, snap] of Object.entries(page.snapshots)) {
+        const q = this.mapQuote(ticker, snap, underlying);
+        if (q) quotes.push(q);
+      }
+
+      pages++;
+      pageToken = page.next_page_token;
+      if (pageToken && pages >= MAX_PAGES) { truncated = true; break; }
+    } while (pageToken);
+
+    const today = isoTodayET();
+    const liveQuotes = quotes.filter(q => q.expiry >= today);
+
+    const withMid = liveQuotes.filter(q => q.mid !== null).length;
+    const quoteBasis: "mid" | "close" = withMid > liveQuotes.length / 2 ? "mid" : "close";
+    const expiries = [...new Set(liveQuotes.map(q => q.expiry))].sort();
+
+    console.log(
+      `[alpaca] paper chain ${underlying}: ${liveQuotes.length} contracts, ` +
+      `${expiries.length} expiries (21-45 DTE)` +
+      (truncated ? " [TRUNCATED]" : "")
+    );
+
+    return {
+      underlying, spot,
+      asOf:        new Date().toISOString(),
+      expiries,
+      quotes:      liveQuotes,
+      dataQuality: "delayed",
+      quoteBasis,
+      truncated,
+    };
+  }
+
   async getChain(underlying: string): Promise<OptionChain> {
     const spot = await this.getSpot(underlying);
 

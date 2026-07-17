@@ -351,3 +351,86 @@ VRP persists because:
 
 The risk is real, as March 2025 showed: a seller who was short vol through the
 tariff shock absorbed a ~34-point loss in a single 21-day window.
+
+---
+
+### Why sells fill at the bid
+
+When you place a sell order for an option, you transact with whoever is willing
+to buy from you — and the best available buyer is at the bid price. The mid is
+an arithmetic average of bid and ask; it assumes you can always find a
+counterparty at the exact midpoint, which is only possible when your order size
+matches a willing counterparty exactly. In practice, retail option orders fill
+at or near the bid when selling (and at or near the ask when buying), because
+the market maker captures the spread as compensation for providing liquidity.
+
+Using mid-fills in a paper P&L is a common flattery. Over many trades the
+spread compounds: on SPY options with $0.05-$0.15 bid-ask spreads, mid vs. bid
+is $2.50-$7.50 per contract per trade. This engine uses the crossing fill
+(sell at bid, buy at ask) as the minimum realistic transaction cost model. The
+remaining reality gap is market impact on large size and early-close slippage,
+which are not modeled here.
+
+---
+
+### Why 30-delta for SPY put selling
+
+The delta of an OTM put expresses the market's risk-neutral probability that
+the put expires in-the-money. A 30-delta put is roughly 30% likely to expire
+ITM under the risk-neutral measure. Because implied vol structurally exceeds
+realized vol (the VRP), the real-world probability of assignment is lower — the
+market overprices puts relative to their actuarial cost.
+
+The 30-delta level specifically represents a tested balance between competing
+objectives in premium harvest strategies:
+
+- **Premium per unit of capital**: 30-delta puts on SPY typically generate
+  $1-3 credit, representing 0.15-0.40% of the notional secured. Further OTM
+  (20-delta) has lower credit density; the VRP doesn't compensate sufficiently
+  at those strikes.
+
+- **Distance from spot**: 30-delta puts are typically 3-6% below current spot
+  — enough clearance to survive a one-standard-deviation day move without
+  entering ITM territory. On a $580 SPY, that's a strike around $540-560.
+
+- **Assignment risk**: if the put does expire ITM, you acquire 100 shares at
+  the strike price. At 30-delta (not 40 or 50), this is the strategy's
+  "escape valve" — at strikes this far OTM, assignment means buying SPY at a
+  discount to where it was when you sold. For a long-term SPY holder this is
+  not catastrophic (unlike selling puts on individual stocks, where assignment
+  means owning a company you may not want).
+
+- **Theta efficiency**: 30-delta puts sit in the zone where theta decay is
+  meaningful (unlike 10-delta puts where premium is too thin) without the
+  gamma explosion of ATM options (where small moves cause large delta swings
+  that overwhelm the theta collected).
+
+---
+
+### Why the ledger lives in git
+
+Trade records have three requirements: immutability, auditability, and
+accessibility. A traditional database satisfies only one of these out of the
+box — it stores records, but they can be edited, deleted, or lost, and
+querying history requires additional infrastructure.
+
+Git provides all three for free:
+
+- **Immutability**: commits are SHA-signed; altering past entries requires
+  rewriting history (detectable by anyone with a clone). The convention of
+  append-only entries — never edit, only add — makes the human intent clear.
+
+- **Auditability**: `git log --follow data/paper/ledger.json` shows the exact
+  state of the ledger at every point in time, who changed it and when, and
+  what the diff was. `git show <sha>:data/paper/ledger.json` recovers any
+  historical snapshot without a running database.
+
+- **Accessibility**: the ledger is plain JSON, readable with any text editor,
+  diffable with standard tools, and recoverable from any git host. It requires
+  no migration, no schema versioning, and no running server to query.
+
+The "Sunday ritual" commit pattern — propose on Sunday, open, commit the open,
+mark during the week and commit the marks, close and commit the close — creates
+a narrative history where each position has a clear paper trail tied to a
+real-time clock (the git commit timestamp). This is the spirit of a trading
+journal made operational.
